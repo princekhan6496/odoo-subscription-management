@@ -15,8 +15,10 @@ class VariantUpdate(BaseModel):
     additional_price: Decimal = Field(ge=0)
 
 @router.get("/products", response_model=list[ProductResponse])
-def list_products(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db: Session = Depends(get_db), _=Depends(require_roles(UserRole.ADMIN, UserRole.STAFF))):
-    return list(db.scalars(select(Product).where(Product.is_active.is_(True)).order_by(Product.id.desc()).limit(limit).offset(offset)))
+def list_products(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),db: Session = Depends(get_db), _=Depends(require_roles(UserRole.ADMIN, UserRole.STAFF))):
+    stmt=select(Product).where(Product.is_active.is_(True))
+    if q and q.strip(): stmt=stmt.where(Product.name.ilike(f"%{q.strip()}%"))
+    return list(db.scalars(stmt.order_by(Product.name.asc()).limit(limit).offset(offset)))
 
 @router.post("/products", response_model=ProductResponse, status_code=201)
 def create_product(payload: ProductCreate, db: Session = Depends(get_db), _=Depends(require_roles(UserRole.ADMIN))):
@@ -33,8 +35,10 @@ def update_product(product_id: int, payload: ProductCreate, db: Session = Depend
     return item
 
 @router.get("/plans", response_model=list[PlanResponse])
-def list_plans(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db: Session = Depends(get_db), _=Depends(require_roles(UserRole.ADMIN, UserRole.STAFF, UserRole.CUSTOMER))):
-    return list(db.scalars(select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.id.desc()).limit(limit).offset(offset)))
+def list_plans(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),db: Session = Depends(get_db), _=Depends(require_roles(UserRole.ADMIN, UserRole.STAFF, UserRole.CUSTOMER))):
+    stmt=select(Plan).where(Plan.is_active.is_(True))
+    if q and q.strip(): stmt=stmt.where(Plan.name.ilike(f"%{q.strip()}%"))
+    return list(db.scalars(stmt.order_by(Plan.name.asc()).limit(limit).offset(offset)))
 
 @router.post("/plans", response_model=PlanResponse, status_code=201)
 def create_plan(payload: PlanCreate, db: Session = Depends(get_db), _=Depends(require_roles(UserRole.ADMIN))):

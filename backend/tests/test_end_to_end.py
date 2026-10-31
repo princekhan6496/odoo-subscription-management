@@ -29,17 +29,23 @@ def test_subscription_to_invoice_to_partial_payment(client):
     assert sub.json()["status"]=="draft"
     assert client.post(f"/api/v1/subscriptions/{sid}/action/confirm",headers=h).status_code==200
     assert client.post(f"/api/v1/subscriptions/{sid}/action/activate",headers=h).status_code==200
+    subscription_rows=client.get("/api/v1/subscriptions",headers=h).json()
+    assert subscription_rows[0]["customer_name"]=="Acme Pvt Ltd"
+    assert subscription_rows[0]["plan_name"]=="Monthly Growth"
     billing=client.post("/api/v1/billing/run",headers=h)
     assert billing.status_code==200,billing.text
     assert billing.json()["created_count"]==1
     invoices=client.get("/api/v1/invoices",headers=h)
     assert invoices.status_code==200
     invoice=invoices.json()[0]
+    assert invoice["customer_name"]=="Acme Pvt Ltd"
     assert invoice["total"]=="1200.00" or float(invoice["total"])==1200
     pay=client.post(f"/api/v1/invoices/{invoice['id']}/payments",headers={**h,"Idempotency-Key":"payment-key-0001"},json={"method":"upi","amount":"500","reference":"test-payment-001"})
     assert pay.status_code==201,pay.text
     assert pay.json()["invoice_status"]=="partially_paid"
     assert float(pay.json()["outstanding"])==700.0
+    payment_rows=client.get("/api/v1/payments",headers=h).json()
+    assert payment_rows[0]["invoice_number"]==invoice["number"]
     summary=client.get("/api/v1/dashboard/summary",headers=h)
     assert summary.status_code==200
     assert float(summary.json()["collected_this_month"])==500.0
@@ -226,3 +232,60 @@ def test_password_reset_reports_missing_production_email_configuration(client, m
     response=client.post("/api/v1/auth/forgot-password",json={"email":"unknown@billing.example"})
     assert response.status_code==503
     assert "not configured" in response.json()["detail"]
+
+
+def test_searchable_selector_endpoints_return_matching_records(client):
+    h=login(client,"admin@example.com","AdminPass123!")
+    customer=client.post("/api/v1/customers",headers=h,json={"billing_name":"Acme Search Buyer","email":"acme-search@example.com"})
+    product=client.post("/api/v1/products",headers=h,json={"name":"Searchable Analytics Product","product_type":"software","sales_price":"499","cost_price":"100"})
+    plan=client.post("/api/v1/plans",headers=h,json={"name":"Searchable Monthly Plan","billing_interval":"monthly","price":"499","minimum_quantity":2})
+    tax=client.post("/api/v1/taxes",headers=h,json={"name":"Search GST","rate":"18"})
+    assert customer.status_code==201 and product.status_code==201 and plan.status_code==201 and tax.status_code==201
+    assert [row["id"] for row in client.get("/api/v1/customers?q=Acme%20Search",headers=h).json()]==[customer.json()["id"]]
+    assert [row["id"] for row in client.get("/api/v1/products?q=Analytics",headers=h).json()]==[product.json()["id"]]
+    assert [row["id"] for row in client.get("/api/v1/plans?q=Monthly%20Plan",headers=h).json()]==[plan.json()["id"]]
+    assert [row["id"] for row in client.get("/api/v1/taxes?q=Search%20GST",headers=h).json()]==[tax.json()["id"]]
+
+
+def test_discount_can_target_multiple_products(client):
+    h=login(client,"admin@example.com","AdminPass123!")
+    customer=client.post("/api/v1/customers",headers=h,json={"billing_name":"Multi Product Buyer","email":"multi-product@example.com"}).json()
+    first=client.post("/api/v1/products",headers=h,json={"name":"First Eligible Product","product_type":"service","sales_price":"100","cost_price":"0"}).json()
+    second=client.post("/api/v1/products",headers=h,json={"name":"Second Eligible Product","product_type":"service","sales_price":"100","cost_price":"0"}).json()
+    plan=client.post("/api/v1/plans",headers=h,json={"name":"Multi Product Plan","billing_interval":"monthly","price":"200","minimum_quantity":1}).json()
+    discount=client.post("/api/v1/discounts",headers=h,json={"name":"Two product promo","kind":"percentage","value":"10","max_uses":1,"product_ids":[first["id"],second["id"]]} )
+    assert discount.status_code==201,discount.text
+    sub=client.post("/api/v1/subscriptions",headers=h,json={"customer_id":customer["id"],"plan_id":plan["id"],"start_date":"2026-10-31","items":[{"product_id":first["id"],"quantity":1},{"product_id":second["id"],"quantity":1}]})
+    assert sub.status_code==201,sub.text
+    sid=sub.json()["id"]
+    client.post(f"/api/v1/subscriptions/{sid}/action/confirm",headers=h)
+    client.post(f"/api/v1/subscriptions/{sid}/action/activate",headers=h)
+    assert client.post("/api/v1/billing/run",headers=h).status_code==200
+    invoice=client.get("/api/v1/invoices",headers=h).json()[0]
+    assert float(invoice["discount_total"])==20.0
+    from app.db import SessionLocal
+    from app.models import InvoiceItem
+    db=SessionLocal()
+    try:
+        lines=db.query(InvoiceItem).filter(InvoiceItem.invoice_id==invoice["id"]).all()
+        assert len(lines)==2
+        assert sorted(float(line.discount_amount) for line in lines)==[10.0,10.0]
+        from app.models import Discount
+        applied=db.query(Discount).filter(Discount.id==discount.json()["id"]).one()
+        assert applied.used_count==1
+    finally:
+        db.close()
+
+
+def test_staff_cannot_override_catalogue_price(client):
+    admin_headers=login(client,"admin@example.com","AdminPass123!")
+    customer=client.post("/api/v1/customers",headers=admin_headers,json={"billing_name":"Price Buyer","email":"price-buyer@example.com"}).json()
+    product=client.post("/api/v1/products",headers=admin_headers,json={"name":"Catalog Price Product","product_type":"service","sales_price":"100","cost_price":"0"}).json()
+    plan=client.post("/api/v1/plans",headers=admin_headers,json={"name":"Price Guard Plan","billing_interval":"monthly","price":"100","minimum_quantity":1}).json()
+    staff=client.post("/api/v1/staff",headers=admin_headers,json={"email":"staff-price@example.com","full_name":"Price Staff","password":"StaffPrice123!"})
+    assert staff.status_code==201,staff.text
+    staff_headers=login(client,"staff-price@example.com","StaffPrice123!")
+    quote=client.post("/api/v1/quotations",headers=staff_headers,json={"customer_id":customer["id"],"plan_id":plan["id"],"items":[{"product_id":product["id"],"quantity":1,"unit_price":"1"}]})
+    assert quote.status_code==403,quote.text
+    template=client.post("/api/v1/quotation-templates",headers=staff_headers,json={"name":"Catalogue-priced template","items":[{"product_id":product["id"],"quantity":1,"unit_price":None}]})
+    assert template.status_code==201,template.text

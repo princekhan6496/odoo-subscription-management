@@ -14,3 +14,5 @@ Core entities:
 - `audit_logs`: actor, action, entity and JSON details.
 
 Money uses fixed precision `NUMERIC(12,2)`, not binary floating-point. Invoices preserve their own line snapshots, including per-line discount amounts, so later catalogue price changes do not rewrite issued invoices.
+
+Discount product targeting now supports multiple catalogue products through `discounts.product_ids` (JSON array). The legacy `product_id` field is retained for compatibility; migration `0004_discount_product_selection` backfills existing single-product rules into the new collection. A product-targeted discount is counted once per invoice even when it applies to multiple invoice lines.

@@ -8,6 +8,7 @@ class ProductCreate(BaseModel):
     sales_price: Decimal = Field(ge=0, max_digits=12, decimal_places=2)
     cost_price: Decimal = Field(default=Decimal("0"), ge=0, max_digits=12, decimal_places=2)
     notes: str | None = None
+    is_active: bool = True
 
 class ProductResponse(ProductCreate):
     id: int
@@ -25,6 +26,7 @@ class PlanCreate(BaseModel):
     allow_early_close: bool = True
     allow_pause: bool = True
     allow_renewal: bool = True
+    is_active: bool = True
 
 class PlanResponse(PlanCreate):
     id: int

@@ -107,6 +107,7 @@ class Discount(Base):
     max_uses: Mapped[int | None] = mapped_column(Integer)
     used_count: Mapped[int] = mapped_column(Integer, default=0)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
+    product_ids: Mapped[list[int]] = mapped_column(JSON, default=list, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 class Invoice(Base):

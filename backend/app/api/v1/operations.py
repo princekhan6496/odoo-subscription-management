@@ -5,7 +5,7 @@ import hashlib, hmac, secrets
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field, field_validator
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import select, func, and_, case, or_
 from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import *
@@ -111,17 +111,20 @@ class SubscriptionRequestIn(BaseModel):
 class TaxIn(BaseModel):
     name: str
     rate: Decimal = Field(ge=0, le=100)
+    is_active: bool = True
 
 class DiscountIn(BaseModel):
     name: str
     kind: str
     value: Decimal = Field(gt=0)
-    min_purchase: Decimal = Field(default=0, ge=0)
+    min_purchase: Decimal = Field(default=Decimal("0"), ge=0)
     min_quantity: int = Field(default=1, ge=1)
     starts_at: date | None = None
     ends_at: date | None = None
     max_uses: int | None = Field(default=None, ge=1)
     product_id: int | None = None
+    product_ids: list[int] = Field(default_factory=list)
+    is_active: bool = True
 
 class PaymentIn(BaseModel):
     method: str
@@ -167,8 +170,12 @@ def update_customer_profile(payload:CustomerPatch,db:Session=Depends(get_db),use
     db.commit(); db.refresh(obj); return obj
 
 @router.get("/customers")
-def customers(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db: Session=Depends(get_db), user: User=Depends(require_roles(*ADMIN_STAFF))):
-    return db.scalars(select(Customer).order_by(Customer.id.desc()).limit(limit).offset(offset)).all()
+def customers(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=160),db: Session=Depends(get_db), user: User=Depends(require_roles(*ADMIN_STAFF))):
+    stmt=select(Customer)
+    if q and q.strip():
+        term=f"%{q.strip()}%"
+        stmt=stmt.where((Customer.billing_name.ilike(term))|(Customer.email.ilike(term))|(Customer.company_name.ilike(term)))
+    return db.scalars(stmt.order_by(Customer.billing_name.asc()).limit(limit).offset(offset)).all()
 
 @router.post("/customers", status_code=201)
 def create_customer(payload: CustomerIn, db: Session=Depends(get_db), user: User=Depends(require_roles(*ADMIN_STAFF))):
@@ -234,7 +241,22 @@ def variants(product_id:int,db:Session=Depends(get_db),user:User=Depends(require
 
 @router.post("/quotation-templates",status_code=201)
 def create_template(payload:dict,db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
-    obj=QuotationTemplate(name=payload["name"],validity_days=int(payload.get("validity_days",30)),items=payload.get("items",[]))
+    name=str(payload.get("name","")).strip()
+    validity=int(payload.get("validity_days",30))
+    if not name or len(name)>160: raise HTTPException(422,"Template name is required and must be at most 160 characters")
+    if validity<1 or validity>365: raise HTTPException(422,"Template validity must be between 1 and 365 days")
+    items=[]
+    for raw in payload.get("items",[]):
+        line=QuoteItemIn.model_validate(raw)
+        if line.unit_price is not None and user.role!=UserRole.ADMIN: raise HTTPException(403,"Only administrators may override catalogue prices")
+        product=db.get(Product,line.product_id)
+        if not product or not product.is_active: raise HTTPException(400,"Template contains an unavailable product")
+        if line.variant_id:
+            variant=db.get(ProductVariant,line.variant_id)
+            if not variant or variant.product_id!=product.id: raise HTTPException(400,"Template variant does not belong to its product")
+        items.append({"product_id":line.product_id,"variant_id":line.variant_id,"quantity":line.quantity,"unit_price":str(line.unit_price) if line.unit_price is not None else None,"tax_rate":str(line.tax_rate) if line.tax_rate is not None else None})
+    if not items: raise HTTPException(422,"A quotation template must contain at least one product line")
+    obj=QuotationTemplate(name=name,validity_days=validity,items=items)
     db.add(obj); db.commit(); db.refresh(obj); return obj
 
 @router.get("/quotation-templates")
@@ -279,6 +301,8 @@ def create_quote(payload:QuoteIn,db:Session=Depends(get_db),user:User=Depends(re
         quote_lines=[QuoteItemIn.model_validate(item) for item in template.items]
         q.valid_until=datetime.now(timezone.utc).date()+timedelta(days=template.validity_days)
     for line in quote_lines:
+        if line.unit_price is not None and user.role!=UserRole.ADMIN:
+            raise HTTPException(403,"Only administrators may override catalogue prices")
         product=db.get(Product,line.product_id)
         if not product or not product.is_active: raise HTTPException(400,f"Invalid product {line.product_id}")
         unit=line.unit_price if line.unit_price is not None else product.sales_price
@@ -299,13 +323,14 @@ def create_quote(payload:QuoteIn,db:Session=Depends(get_db),user:User=Depends(re
 
 @router.get("/quotations")
 def list_quotes(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),status_filter:str|None=None,customer_id:int|None=None,db:Session=Depends(get_db),user:User=Depends(current_user)):
-    stmt=select(Quotation).order_by(Quotation.id.desc())
+    stmt=select(Quotation,Customer,Plan).join(Customer,Quotation.customer_id==Customer.id).outerjoin(Plan,Quotation.plan_id==Plan.id).order_by(Quotation.id.desc())
     if user.role==UserRole.CUSTOMER:
         cid=customer_scope(db,user); stmt=stmt.where(Quotation.customer_id==cid)
     elif customer_id is not None:
         stmt=stmt.where(Quotation.customer_id==customer_id)
     if status_filter: stmt=stmt.where(Quotation.status==status_filter)
-    return db.scalars(stmt.limit(limit).offset(offset)).all()
+    rows=db.execute(stmt.limit(limit).offset(offset)).all()
+    return [{**{column.name:getattr(q,column.name) for column in Quotation.__table__.columns},"customer_name":customer.billing_name,"customer_email":customer.email,"plan_name":plan.name if plan else None} for q,customer,plan in rows]
 
 @router.post("/quotations/{quote_id}/convert",status_code=201)
 def convert_quote(quote_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
@@ -344,6 +369,8 @@ def create_subscription(payload:SubscriptionIn,db:Session=Depends(get_db),user:U
         pass
     else:
         for line in lines:
+            if line.unit_price is not None and user.role!=UserRole.ADMIN:
+                raise HTTPException(403,"Only administrators may override catalogue prices")
             product=db.get(Product,line.product_id)
             if not product or not product.is_active: raise HTTPException(400,"Invalid or inactive product")
             price=line.unit_price if line.unit_price is not None else product.sales_price
@@ -375,12 +402,13 @@ def request_subscription(payload:SubscriptionRequestIn,db:Session=Depends(get_db
 
 @router.get("/subscriptions")
 def subscriptions(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db:Session=Depends(get_db),user:User=Depends(current_user),status_filter:str|None=None,customer_id:int|None=None):
-    stmt=select(Subscription).order_by(Subscription.id.desc())
+    stmt=select(Subscription,Customer,Plan).join(Customer,Subscription.customer_id==Customer.id).join(Plan,Subscription.plan_id==Plan.id).order_by(Subscription.id.desc())
     cid=customer_scope(db,user)
     if cid: stmt=stmt.where(Subscription.customer_id==cid)
     elif customer_id is not None: stmt=stmt.where(Subscription.customer_id==customer_id)
     if status_filter: stmt=stmt.where(Subscription.status==status_filter)
-    return db.scalars(stmt.limit(limit).offset(offset)).all()
+    rows=db.execute(stmt.limit(limit).offset(offset)).all()
+    return [{**{column.name:getattr(sub,column.name) for column in Subscription.__table__.columns},"customer_name":customer.billing_name,"customer_email":customer.email,"plan_name":plan.name,"billing_interval":plan.billing_interval,"plan_price":plan.price,"allow_pause":plan.allow_pause,"allow_renewal":plan.allow_renewal,"allow_early_close":plan.allow_early_close,"minimum_quantity":plan.minimum_quantity} for sub,customer,plan in rows]
 
 @router.get("/subscriptions/{subscription_id}")
 def subscription_detail(subscription_id:int,db:Session=Depends(get_db),user:User=Depends(current_user)):
@@ -441,15 +469,17 @@ def create_tax(payload:TaxIn,db:Session=Depends(get_db),user:User=Depends(requir
     obj=Tax(**payload.model_dump()); db.add(obj); db.commit(); db.refresh(obj); return obj
 
 @router.get("/taxes")
-def list_taxes(db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
-    return db.scalars(select(Tax).where(Tax.is_active.is_(True))).all()
+def list_taxes(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
+    stmt=select(Tax).where(Tax.is_active.is_(True))
+    if q and q.strip(): stmt=stmt.where(Tax.name.ilike(f"%{q.strip()}%"))
+    return db.scalars(stmt.order_by(Tax.name.asc()).limit(limit).offset(offset)).all()
 
 
 @router.patch("/taxes/{tax_id}")
 def update_tax(tax_id:int,payload:TaxIn,db:Session=Depends(get_db),user:User=Depends(require_roles(UserRole.ADMIN))):
     item=db.get(Tax,tax_id)
     if not item: raise HTTPException(404,"Tax not found")
-    item.name=payload.name; item.rate=payload.rate
+    item.name=payload.name; item.rate=payload.rate; item.is_active=payload.is_active
     audit(db,user,"tax.updated","tax",item.id); db.commit(); db.refresh(item); return item
 
 @router.delete("/taxes/{tax_id}",status_code=204)
@@ -463,7 +493,14 @@ def create_discount(payload:DiscountIn,db:Session=Depends(get_db),user:User=Depe
     if payload.kind not in ("fixed","percentage"): raise HTTPException(400,"kind must be fixed or percentage")
     if payload.kind=="percentage" and payload.value>100: raise HTTPException(400,"Percentage cannot exceed 100")
     if payload.ends_at and payload.starts_at and payload.ends_at<payload.starts_at: raise HTTPException(400,"Discount end date must be on or after its start date")
-    obj=Discount(**payload.model_dump()); db.add(obj); audit(db,user,"discount.created","discount",payload.name); db.commit(); db.refresh(obj); return obj
+    values=payload.model_dump()
+    product_ids=list(dict.fromkeys(values.pop("product_ids",[]) + ([values["product_id"]] if values.get("product_id") else [])))
+    if product_ids:
+        found=set(db.scalars(select(Product.id).where(Product.id.in_(product_ids),Product.is_active.is_(True))).all())
+        if found!=set(product_ids): raise HTTPException(400,"One or more selected products are unavailable")
+    values["product_ids"]=product_ids
+    values["product_id"]=product_ids[0] if len(product_ids)==1 else None
+    obj=Discount(**values); db.add(obj); audit(db,user,"discount.created","discount",payload.name); db.commit(); db.refresh(obj); return obj
 
 
 @router.patch("/discounts/{discount_id}")
@@ -473,7 +510,14 @@ def update_discount(discount_id:int,payload:DiscountIn,db:Session=Depends(get_db
     if payload.kind not in ("fixed","percentage"): raise HTTPException(400,"kind must be fixed or percentage")
     if payload.kind=="percentage" and payload.value>100: raise HTTPException(400,"Percentage cannot exceed 100")
     if payload.ends_at and payload.starts_at and payload.ends_at<payload.starts_at: raise HTTPException(400,"Discount end date must be on or after its start date")
-    for key,value in payload.model_dump().items(): setattr(item,key,value)
+    values=payload.model_dump()
+    product_ids=list(dict.fromkeys(values.pop("product_ids",[]) + ([values["product_id"]] if values.get("product_id") else [])))
+    if product_ids:
+        found=set(db.scalars(select(Product.id).where(Product.id.in_(product_ids),Product.is_active.is_(True))).all())
+        if found!=set(product_ids): raise HTTPException(400,"One or more selected products are unavailable")
+    values["product_ids"]=product_ids
+    values["product_id"]=product_ids[0] if len(product_ids)==1 else None
+    for key,value in values.items(): setattr(item,key,value)
     audit(db,user,"discount.updated","discount",item.id); db.commit(); db.refresh(item); return item
 
 @router.delete("/discounts/{discount_id}",status_code=204)
@@ -483,21 +527,22 @@ def deactivate_discount(discount_id:int,db:Session=Depends(get_db),user:User=Dep
     item.is_active=False; audit(db,user,"discount.deactivated","discount",item.id); db.commit(); return None
 
 @router.get("/discounts")
-def list_discounts(db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
-    return db.scalars(select(Discount).order_by(Discount.id.desc())).all()
-
-def calculate_discount(db, subtotal, quantity, product_id=None):
-    today=datetime.now(timezone.utc).date()
+def list_discounts(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),q:str|None=Query(None,max_length=120),db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
     stmt=select(Discount).where(Discount.is_active.is_(True))
-    if product_id is None:
-        stmt=stmt.where(Discount.product_id.is_(None))
-    else:
-        stmt=stmt.where(Discount.product_id==product_id)
-    rules=db.scalars(stmt.order_by(Discount.id).with_for_update()).all()
+    if q and q.strip(): stmt=stmt.where(Discount.name.ilike(f"%{q.strip()}%"))
+    return db.scalars(stmt.order_by(Discount.name.asc()).limit(limit).offset(offset)).all()
+
+def calculate_discount(db, subtotal, quantity, product_id=None, consumed_discount_ids=None):
+    today=datetime.now(timezone.utc).date()
+    rules=db.scalars(select(Discount).where(Discount.is_active.is_(True)).order_by(Discount.id).with_for_update()).all()
     for d in rules:
+        applicable_ids=set(d.product_ids or [])
+        if d.product_id is not None: applicable_ids.add(d.product_id)
+        if product_id is None and applicable_ids: continue
+        if product_id is not None and applicable_ids and product_id not in applicable_ids: continue
         if d.starts_at and today<d.starts_at: continue
         if d.ends_at and today>d.ends_at: continue
-        if d.max_uses is not None and d.used_count>=d.max_uses: continue
+        if d.max_uses is not None and d.used_count>=d.max_uses and (consumed_discount_ids is None or d.id not in consumed_discount_ids): continue
         if subtotal<d.min_purchase or quantity<d.min_quantity: continue
         amount=money(d.value if d.kind=="fixed" else subtotal*d.value/100)
         amount=min(amount,subtotal)
@@ -513,14 +558,17 @@ def build_invoice(db,sub,period_start,today):
     db.add(inv); db.flush()
     gross_subtotal=Decimal("0"); product_discount_total=Decimal("0"); total_quantity=0
     line_bases=[]
+    consumed_discount_ids=set()
     if sub.items:
         for item in sub.items:
             quantity=item.quantity*sub.quantity
             base=money(item.unit_price*quantity)
-            product_discount,discount_amount=calculate_discount(db,base,quantity,item.product_id)
+            product_discount,discount_amount=calculate_discount(db,base,quantity,item.product_id,consumed_discount_ids)
             net_base=money(base-discount_amount)
             if product_discount:
-                product_discount.used_count+=1
+                if product_discount.id not in consumed_discount_ids:
+                    product_discount.used_count+=1
+                    consumed_discount_ids.add(product_discount.id)
                 product_discount_total+=discount_amount
             gross_subtotal+=base; total_quantity+=quantity
             line_bases.append({"description":item.description,"quantity":quantity,"unit_price":item.unit_price,"tax_rate":item.tax_rate,"gross":base,"net":net_base,"product_discount":discount_amount})
@@ -531,9 +579,11 @@ def build_invoice(db,sub,period_start,today):
         default_tax=db.scalar(select(Tax).where(Tax.is_active.is_(True)).order_by(Tax.id).limit(1))
         line_bases.append({"description":plan.name,"quantity":quantity,"unit_price":plan.price,"tax_rate":default_tax.rate if default_tax else Decimal("0"),"gross":base,"net":base,"product_discount":Decimal("0")})
     after_product_discounts=sum((line["net"] for line in line_bases),Decimal("0"))
-    global_discount,global_discount_amount=calculate_discount(db,after_product_discounts,total_quantity,None)
+    global_discount,global_discount_amount=calculate_discount(db,after_product_discounts,total_quantity,None,consumed_discount_ids)
     if global_discount:
-        global_discount.used_count+=1
+        if global_discount.id not in consumed_discount_ids:
+            global_discount.used_count+=1
+            consumed_discount_ids.add(global_discount.id)
     # Allocate the subscription-wide discount proportionally, with rounding residue assigned to the final line.
     remaining_global=global_discount_amount
     remaining_base=after_product_discounts
@@ -624,7 +674,7 @@ async def qstash_billing(request:Request,db:Session=Depends(get_db)):
 
 @router.get("/invoices")
 def list_invoices(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db:Session=Depends(get_db),user:User=Depends(current_user),status_filter:str|None=None,customer_id:int|None=None,date_from:date|None=None,date_to:date|None=None):
-    stmt=select(Invoice).order_by(Invoice.id.desc())
+    stmt=select(Invoice,Customer).join(Customer,Invoice.customer_id==Customer.id).order_by(Invoice.id.desc())
     cid=customer_scope(db,user)
     if cid: stmt=stmt.where(Invoice.customer_id==cid)
     elif customer_id is not None: stmt=stmt.where(Invoice.customer_id==customer_id)
@@ -633,8 +683,8 @@ def list_invoices(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db:S
     today=datetime.now(timezone.utc).date()
     if status_filter=="overdue": stmt=stmt.where(Invoice.due_date<today,Invoice.total>Invoice.amount_paid,Invoice.status.notin_(["paid","cancelled"]))
     elif status_filter: stmt=stmt.where(Invoice.status==status_filter)
-    rows=db.scalars(stmt.limit(limit).offset(offset)).all()
-    return [{"id":i.id,"number":i.number,"customer_id":i.customer_id,"subscription_id":i.subscription_id,"invoice_date":i.invoice_date,"due_date":i.due_date,"status":"overdue" if i.status not in ("paid","cancelled") and i.due_date<today and i.total>i.amount_paid else i.status,"subtotal":i.subtotal,"tax_total":i.tax_total,"discount_total":i.discount_total,"total":i.total,"amount_paid":i.amount_paid,"outstanding":money(i.total-i.amount_paid)} for i in rows]
+    rows=db.execute(stmt.limit(limit).offset(offset)).all()
+    return [{"id":i.id,"number":i.number,"customer_id":i.customer_id,"customer_name":customer.billing_name,"customer_email":customer.email,"subscription_id":i.subscription_id,"invoice_date":i.invoice_date,"due_date":i.due_date,"status":"overdue" if i.status not in ("paid","cancelled") and i.due_date<today and i.total>i.amount_paid else i.status,"subtotal":i.subtotal,"tax_total":i.tax_total,"discount_total":i.discount_total,"total":i.total,"amount_paid":i.amount_paid,"outstanding":money(i.total-i.amount_paid)} for i,customer in rows]
 
 @router.post("/invoices/{invoice_id}/confirm")
 def confirm_invoice(invoice_id:int,db:Session=Depends(get_db),user:User=Depends(require_roles(*ADMIN_STAFF))):
@@ -678,10 +728,11 @@ def record_payment(invoice_id:int,payload:PaymentIn,idempotency_key:str=Header(.
 
 @router.get("/payments")
 def payments(limit:int=Query(100,ge=1,le=200),offset:int=Query(0,ge=0),db:Session=Depends(get_db),user:User=Depends(current_user)):
-    stmt=select(Payment).order_by(Payment.id.desc()).limit(limit).offset(offset)
+    stmt=select(Payment,Invoice,Customer).join(Invoice,Payment.invoice_id==Invoice.id).join(Customer,Invoice.customer_id==Customer.id).order_by(Payment.id.desc())
     cid=customer_scope(db,user)
-    if cid: stmt=stmt.join(Invoice).where(Invoice.customer_id==cid)
-    return db.scalars(stmt).all()
+    if cid: stmt=stmt.where(Invoice.customer_id==cid)
+    rows=db.execute(stmt.limit(limit).offset(offset)).all()
+    return [{**{column.name:getattr(payment,column.name) for column in Payment.__table__.columns},"invoice_number":invoice.number,"customer_name":customer.billing_name,"customer_email":customer.email} for payment,invoice,customer in rows]
 
 @router.post("/webhooks/razorpay")
 async def razorpay_webhook(request:Request,db:Session=Depends(get_db)):

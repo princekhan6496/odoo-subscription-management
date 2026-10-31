@@ -12,27 +12,31 @@ This document separates code that has been implemented and locally checked from 
 - Invoice generation with product-specific discount deduction from taxable line bases, subscription-wide discount allocation, tax calculation, partial/full payments and outstanding balance tracking.
 - PostgreSQL row locks on invoice payment and due-subscription processing paths; unique invoice-per-subscription-period constraints; manual-payment idempotency keys; Razorpay webhook signature verification, stored-order matching and payment-reference deduplication; QStash delivery verification and schedule helper.
 - Password-reset token expiry, single-use semantics, replacement-token invalidation and session token-version revocation. Login/password-reset rate limiting and optional email verification are not yet implemented.
-- Paginated list APIs with bounded `limit`/`offset`; invoice status/date/customer filters; MRR calculated with one SQL aggregation rather than per-subscription plan lookups.
+- Paginated list APIs with bounded `limit`/`offset`; customer/product/plan/tax/discount server-side search; invoice status/date/customer filters; MRR calculated with one SQL aggregation rather than per-subscription plan lookups.
 - PDF invoice generation, Resend email calls, QStash signature receiver and scheduling helper, Razorpay order creation and webhook endpoint.
 - Render/Vercel configuration, environment templates, seed script, API/database/deployment documentation.
 - UI motion reduced to restrained press feedback, pointer-gated hover behavior and reduced-motion support.
+- Added reusable debounced API-backed searchable selectors for customers, plans, products, variants and taxes, plus a multi-select product picker for discount applicability.
+- Quotation and quotation-template forms now support multiple product lines; product selection auto-populates price and variant selection adds its price delta. Payment recording now uses an invoice-context modal with outstanding-balance validation instead of a free-form prompt.
+- List responses now include customer/plan/invoice human-readable references and subscription plan permissions; the frontend hides raw foreign-key IDs and only offers lifecycle actions allowed by the plan.
+- Discounts support multiple applicable products while preserving the legacy single `product_id` field. A new migration `0004_discount_product_selection` backfills legacy product-specific discounts and adds invoice-level discount usage accounting so a maximum-use limit is counted once per invoice.
 
 ## Checks that passed in this workspace
 
 - `python -m compileall -q app migrations scripts tests` — passed.
-- `pytest -q` — **20 passed**.
-- `alembic upgrade head` and `alembic current` — passed against a temporary SQLite migration harness; head is `0003_financial_integrity`.
+- `pytest -q` — **23 passed**.
+- `alembic upgrade head` and `alembic current` — passed against a temporary SQLite migration harness; head is `0004_discount_product_selection`.
 - Demo seed script was run twice against a temporary SQLite test database and completed idempotently in the earlier verification pass.
 - ZIP archive integrity is checked again before final delivery.
 
 ## Not verified or still incomplete
 
-- The npm registry timed out. No `package-lock.json` could be generated; `npm ci`, ESLint, TypeScript and the Next.js production build are not verified. `node_modules` is absent.
+- The npm registry timed out again during this update. No `package-lock.json` could be generated; `npm ci`, ESLint, TypeScript and the Next.js production build are not verified. `node_modules` is absent.
 - Ruff is not installed in this runtime, so lint could not be run.
 - PostgreSQL-specific row-lock and concurrent-worker behavior has not been tested against a live PostgreSQL server. SQLite migration tests do not validate `SELECT FOR UPDATE` semantics.
 - Resend, QStash, Razorpay, Supabase, Render and Vercel have not been connected or deployed with live credentials. No provider success is claimed.
 - The default Vercel and Render hostnames may be treated as cross-site for cookies and can be blocked by browser third-party-cookie restrictions. Use frontend/API custom hostnames under the same registrable domain and configure `COOKIE_DOMAIN` for production.
-- Quotation discounts are not yet persisted as immutable discount snapshots through conversion; invoice billing recalculates the active discount rules, so a rule changed after quote acceptance can make the invoice differ from the quotation. Advanced filters and total-count metadata are not implemented on every list; the current frontend does not yet expose all server pagination controls.
+- Quotation discounts are not yet persisted as immutable discount snapshots through conversion; invoice billing recalculates the active discount rules, so a rule changed after quote acceptance can make the invoice differ from the quotation. Advanced filters and total-count metadata are not implemented on every list; the current frontend does not yet expose all server pagination controls. Subscription creation is still plan-based rather than itemized, and the UI does not yet offer full edit/detail workflows for every entity.
 - The frontend remains a consolidated dashboard page rather than a complete componentized suite. Full edit workflows for every entity, customer invitation/verification, subscription purchase/checkout beyond a draft request, automated notification dispatch for all lifecycle events, payment reversals/refunds, and full browser/mobile E2E coverage remain incomplete.
 - Performance under thousands of records and the original under-two-second page target has not been benchmarked.
 

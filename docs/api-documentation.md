@@ -22,3 +22,9 @@ List endpoints accept bounded `limit` and `offset` query parameters; invoices al
 - **ARR** is MRR × 12.
 - **Collected revenue** is the sum of verified payment ledger entries in the selected period; it is not the sum of invoices issued.
 - **Outstanding** is the sum of non-cancelled invoice total minus successful/verified payments recorded against each invoice.
+
+## Searchable selector APIs
+
+`GET /customers`, `/products`, `/plans`, `/taxes` and `/discounts` accept `q` for server-side name/email filtering, alongside bounded `limit` and `offset`. Customer search matches billing name, email and company. Product, plan, tax and discount search match their names. These endpoints return real persisted records and are used by the frontend searchable selectors; they do not rely on hardcoded customer/product/plan IDs.
+
+Subscription list responses include customer and plan display labels plus plan lifecycle permissions. Quotation responses include customer and plan labels. Invoice responses include customer labels, and payment responses include invoice and customer references. Internal foreign keys remain available to API clients but are not used as the primary display labels in the workspace tables.

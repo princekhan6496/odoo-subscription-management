@@ -16,7 +16,8 @@ Brightloop is a modular full-stack subscription operations application based on 
 - Admin bootstrap guarded by `ALLOW_ADMIN_BOOTSTRAP`; only admin can create staff.
 - Role-aware APIs for admin, staff and customer. Customers can request their own plan subscription; customer records are restricted to their linked profile.
 - Products, variants, plans and pricing rules.
-- Customer management, quotation templates, quotations and quote-to-subscription conversion.
+- Customer management, quotation templates, multi-line quotations and quote-to-subscription conversion.
+- API-backed searchable customer/plan/product/variant/tax selectors; product price auto-fill; multi-product discount applicability; automatic line subtotal previews; invoice-context payment entry.
 - Subscription creation, separate confirmation/activation, pause/resume with billing-date adjustment, renewal, closure and expiry handling.
 - Billing run endpoint plus QStash signed HTTP endpoint; billing periods and invoices have database uniqueness guards.
 - Tax rules and default tax selection; fixed and percentage discount rules with minimum purchase/quantity, date windows and usage caps.
@@ -48,7 +49,7 @@ python -m venv .venv
 pip install -r requirements.txt
 cp .env.example .env
 # Set DATABASE_URL and SECRET_KEY
-alembic upgrade head
+alembic upgrade head  # includes 0004_discount_product_selection
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -99,6 +100,7 @@ Tests that require a PostgreSQL server or external provider credentials are not 
 ## Deployment
 
 See:
+- `docs/form-ux.md` for searchable selectors, auto-population and remaining form limitations.
 - `render.yaml`
 - `vercel.json`
 - `backend/.env.example`
