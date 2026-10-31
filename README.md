@@ -1,134 +1,369 @@
-# Brightloop Subscription Management System
+# Brightloop -- Subscription Management System
 
-Brightloop is a modular full-stack subscription operations application based on the supplied Odoo Hackathon problem statement. It centralizes customer accounts, catalogue, plans, quotations, subscriptions, recurring billing, invoices, payments and reporting.
+A web-based subscription management platform designed to manage
+customers, products, subscription plans, quotations, recurring invoices,
+payments, discounts, and business operations from one workspace.
 
-## Stack
+## Live Demo
 
-- Frontend: Next.js 16.4, React 19.3, TypeScript, Tailwind CSS, Lucide.
-- Backend: FastAPI, Pydantic v2, SQLAlchemy 2.1, Alembic, PostgreSQL.
-- Security: Argon2 password hashing, short-lived JWT in HTTP-only cookies, double-submit CSRF protection, backend role checks, customer record isolation.
-- Optional providers: Supabase PostgreSQL, Resend, Upstash QStash, Razorpay Test Mode.
-- Hosting: Vercel frontend, Render API.
+**Frontend:** <https://odoosubsciptionmanagement.vercel.app/>
 
-## Features implemented in source
+**Backend API:** <https://odoo-subscription-management.onrender.com>
 
-- Customer registration creates a customer billing profile; login/logout use HTTP-only cookies, CSRF checks protect cookie-authenticated mutations, token-version invalidation revokes sessions on logout/password reset, `/me`, forgot/reset password.
-- Admin bootstrap guarded by `ALLOW_ADMIN_BOOTSTRAP`; only admin can create staff.
-- Role-aware APIs for admin, staff and customer. Customers can request their own plan subscription; customer records are restricted to their linked profile.
-- Products, variants, plans and pricing rules.
-- Customer management, quotation templates, multi-line quotations and quote-to-subscription conversion.
-- API-backed searchable customer/plan/product/variant/tax selectors; product price auto-fill; multi-product discount applicability; automatic line subtotal previews; invoice-context payment entry.
-- Subscription creation, separate confirmation/activation, pause/resume with billing-date adjustment, renewal, closure and expiry handling.
-- Billing run endpoint plus QStash signed HTTP endpoint; billing periods and invoices have database uniqueness guards.
-- Tax rules and default tax selection; fixed and percentage discount rules with minimum purchase/quantity, date windows and usage caps.
-- Invoice snapshots, PDF generation, invoice email, partial payment ledger, PostgreSQL row-locking, manual-payment idempotency keys and Razorpay webhook deduplication.
-- Financial KPIs, MRR/ARR normalization, verified collected revenue, outstanding and overdue totals, monthly collection report.
-- Audit events for sensitive operations.
-- Responsive role-aware workspace UI with live API-backed tables, forms, actions, invoice PDF download and payment recording. List APIs accept bounded `limit`/`offset` pagination; invoices support date/customer/status filters.
+**API Documentation:**
+<https://odoo-subscription-management.onrender.com/docs>
 
-## Important integration boundaries
+> The frontend and backend are deployed separately. The live application
+> depends on the backend service being available. On free hosting plans,
+> the backend may take a little time to wake up after inactivity.
 
-The source code implements provider adapters, but a provider connection is not live until credentials and provider-side settings are supplied:
-- Email sending requires verified Resend sender/domain and API key.
-- Scheduled billing requires QStash token, both signing keys and a configured schedule.
-- Razorpay checkout requires Test Mode API keys and a webhook configured for `payment.captured`.
-- Cloud persistence requires a Supabase PostgreSQL connection string.
-No provider success is fabricated when credentials are missing. Quotation discount snapshots are not yet frozen through conversion; if discount rules change after quote approval, invoice-time recalculation may diverge from the accepted quotation.
+## Overview
 
-## Local development
+Brightloop provides a central place for a business to manage
+subscription-related workflows. It supports role-based access for
+administrators, staff, and customers, with access to relevant sections
+based on the signed-in user's role.
 
-### Backend
+The system is intended to make subscription operations easier to track,
+reduce repetitive manual work, and keep important business records
+connected.
 
-Python 3.11+ is recommended.
+## Key Features
 
-```bash
+-   **Authentication and roles:** Sign-in and customer registration,
+    with admin, staff, and customer roles.
+-   **Customer management:** Maintain customer billing and contact
+    information.
+-   **Staff management:** Allow administrators to manage staff accounts.
+-   **Product management:** Create and manage products, including
+    product type and pricing.
+-   **Subscription plans:** Configure billing intervals, prices, minimum
+    quantities, availability, and subscription options.
+-   **Quotation templates:** Create reusable quotation templates with
+    product line items and validity periods.
+-   **Quotations:** Prepare and manage customer quotations.
+-   **Subscription lifecycle:** Manage subscription records and
+    supported actions such as confirmation, activation, pause, resume,
+    renewal, and closure.
+-   **Invoices:** View invoices, confirm or cancel eligible invoices,
+    and download invoice PDFs.
+-   **Payments:** Record payments and view payment-related information.
+    Online payment checkout can be configured with Razorpay.
+-   **Discounts and taxes:** Configure discount rules and tax rates.
+-   **Dashboard and reports:** View business summaries and monthly
+    collection information.
+
+Some actions are restricted by role and by the current record status.
+
+## Technology Stack
+
+  Layer                Technologies
+  -------------------- -----------------------------------------------
+  Frontend             Next.js, React, TypeScript, Tailwind CSS
+  Backend              Python, FastAPI
+  Database             PostgreSQL
+  ORM and migrations   SQLAlchemy, Alembic
+  Frontend hosting     Vercel
+  Backend hosting      Render
+  Online payments      Razorpay integration (requires configuration)
+  Email delivery       Resend integration (requires configuration)
+
+## Application Architecture
+
+``` text
+                         ┌──────────────────────────┐
+                         │       User / Browser     │
+                         └────────────┬─────────────┘
+                                      │
+                                      ▼
+                         ┌──────────────────────────┐
+                         │     Next.js Frontend     │
+                         │          Vercel          │
+                         └────────────┬─────────────┘
+                                      │ HTTPS API requests
+                                      ▼
+                         ┌──────────────────────────┐
+                         │      FastAPI Backend     │
+                         │          Render          │
+                         └────────────┬─────────────┘
+                                      │
+                                      ▼
+                         ┌──────────────────────────┐
+                         │       PostgreSQL         │
+                         └──────────────────────────┘
+
+                    Optional external integrations:
+                         Razorpay • Resend
+```
+
+## User Roles
+
+  -----------------------------------------------------------------------
+  Role                                Intended access
+  ----------------------------------- -----------------------------------
+  Admin                               Administrative operations, staff
+                                      management, configuration, and
+                                      business records
+
+  Staff                               Day-to-day customer, product,
+                                      quotation, subscription, and
+                                      billing operations permitted by the
+                                      application
+
+  Customer                            Customer-facing subscription,
+                                      quotation, invoice, payment, and
+                                      profile information
+  -----------------------------------------------------------------------
+
+The backend must enforce authorization for protected operations; hiding
+a frontend control alone is not a security boundary.
+
+## Getting Started
+
+### Prerequisites
+
+Install the following before running the project locally:
+
+-   Node.js and npm
+-   Python 3.11 or a version supported by the backend dependencies
+-   PostgreSQL database
+-   Git
+
+### 1. Clone the repository
+
+``` bash
+git clone <YOUR_GITHUB_REPOSITORY_URL>
+cd <YOUR_REPOSITORY_FOLDER>
+```
+
+Replace the placeholders with your actual GitHub repository URL and
+folder name.
+
+### 2. Configure the backend
+
+Open the backend directory:
+
+``` bash
 cd backend
+```
+
+Create and activate a virtual environment.
+
+**Windows PowerShell:**
+
+``` powershell
 python -m venv .venv
-# Windows: .venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
+.venv\Scripts\Activate.ps1
+```
+
+**macOS / Linux:**
+
+``` bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Install the backend dependencies using the dependency file present in
+the backend directory. For example, if the project contains
+`requirements.txt`:
+
+``` bash
 pip install -r requirements.txt
-cp .env.example .env
-# Set DATABASE_URL and SECRET_KEY
-alembic upgrade head  # includes 0004_discount_product_selection
+```
+
+Create a backend `.env` file using the variable names expected by the
+backend settings. At minimum, configure the PostgreSQL connection string
+and a strong, private application secret. Check the project's
+settings/configuration file for the exact variable names and required
+values.
+
+Example only --- adapt the names to the backend configuration:
+
+``` env
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DATABASE
+SECRET_KEY=replace-with-a-long-random-secret
+```
+
+Do not commit `.env` files or real credentials to Git.
+
+### 3. Run database migrations
+
+With the backend virtual environment active and the database configured:
+
+``` bash
+alembic upgrade head
+```
+
+If the project includes a seed script and you want sample data in a
+development database, run the seed command documented by that script. Do
+not run seed scripts against a production database unless you understand
+the records they create.
+
+### 4. Start the backend
+
+From the backend directory, run:
+
+``` bash
 uvicorn app.main:app --reload --port 8000
 ```
 
-API docs: `http://localhost:8000/docs`; health: `http://localhost:8000/health`.
+The API should be available at:
 
-Create the first admin once:
-1. Set `ALLOW_ADMIN_BOOTSTRAP=true`.
-2. POST `/api/v1/auth/bootstrap-admin` with `email`, `full_name`, and a strong `password`.
-3. Immediately set `ALLOW_ADMIN_BOOTSTRAP=false`.
+-   API base: `http://localhost:8000`
+-   Swagger documentation: `http://localhost:8000/docs`
 
-Optional demo data:
-```bash
-cd backend
-# Set DEMO_ADMIN_PASSWORD, DEMO_STAFF_PASSWORD, DEMO_CUSTOMER_PASSWORD in environment.
-python scripts/seed_demo.py
-```
-The seed creates accounts only when their email is absent and never embeds demo passwords in source.
+### 5. Configure and start the frontend
 
-### Frontend
+Open a second terminal and navigate to the frontend directory:
 
-```bash
+``` bash
 cd frontend
-cp .env.example .env.local
-# Set NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+Install dependencies:
+
+``` bash
 npm install
+```
+
+Create the frontend environment file (commonly `.env.local`) and set the
+API base URL using the exact environment variable read by
+`src/lib/api.ts`.
+
+For example, if the frontend uses `NEXT_PUBLIC_API_URL`:
+
+``` env
+NEXT_PUBLIC_API_URL=http://localhost:8000
+```
+
+Start the frontend:
+
+``` bash
 npm run dev
 ```
 
-## Testing
+Open <http://localhost:3000>.
 
-```bash
-cd backend
-pytest -q
-python -m compileall -q app migrations scripts
-alembic upgrade head
-alembic current
+> Environment variable names must match the code in
+> `frontend/src/lib/api.ts`. Restart the Next.js development server
+> after changing environment variables.
+
+## Deployment Configuration
+
+### Frontend (Vercel)
+
+Configure the frontend environment variable in the Vercel project
+settings. The variable name must match the one used by the frontend API
+client.
+
+Example:
+
+``` env
+NEXT_PUBLIC_API_URL=https://odoo-subscription-management.onrender.com
 ```
 
-```bash
-cd frontend
-npm ci
-npm run lint
-npm run build
+Apply the variable to the required environments (Production and
+Preview), then redeploy the frontend so the updated value is included in
+the build.
+
+A `NEXT_PUBLIC_` variable is exposed to the browser. It is appropriate
+for a public API base URL, but **never** use this prefix for passwords,
+API secrets, database credentials, or private tokens.
+
+### Backend (Render)
+
+Configure the backend environment variables in the Render service
+settings. Use the production PostgreSQL connection string, a strong
+secret key, and the CORS origins required by the deployed frontend.
+
+The backend CORS allowlist should contain the exact deployed frontend
+origin, for example:
+
+``` text
+https://odoosubsciptionmanagement.vercel.app
 ```
 
-Tests that require a PostgreSQL server or external provider credentials are not equivalent to pure unit tests. Run the documented provider tests against test accounts before production use.
+Do not add a trailing slash to an origin in the CORS allowlist unless
+the backend configuration specifically requires it.
 
-## Deployment
+### Optional integrations
 
-See:
-- `docs/form-ux.md` for searchable selectors, auto-population and remaining form limitations.
-- `render.yaml`
-- `vercel.json`
-- `backend/.env.example`
-- `frontend/.env.example`
-- `docs/deployment.md`
-- `docs/api-documentation.md`
-- `docs/database-schema.md`
-- `docs/testing.md`
-- `docs/completion-status.md`
+-   **Razorpay:** Configure test credentials first. Keep the key secret
+    and webhook secret on the backend only. Never expose them through
+    `NEXT_PUBLIC_` variables.
+-   **Resend:** Configure the email API key and a verified sender
+    address on the backend. Keep the API key private.
 
-### Environment variables
+The exact environment variable names for optional integrations should be
+taken from the backend configuration and deployment settings.
 
-Backend: `DATABASE_URL`, `SECRET_KEY`, `ENVIRONMENT`, `CORS_ORIGINS`, `ALLOW_ADMIN_BOOTSTRAP`, `FRONTEND_URL`, `ACCESS_TOKEN_EXPIRE_MINUTES`, `ACCESS_COOKIE_NAME`, `CSRF_COOKIE_NAME`, `COOKIE_DOMAIN`, `RESEND_API_KEY`, `EMAIL_FROM`, `QSTASH_CURRENT_SIGNING_KEY`, `QSTASH_NEXT_SIGNING_KEY`, `QSTASH_TOKEN`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
+## API Documentation
 
-Frontend: `NEXT_PUBLIC_API_URL` and optional `NEXT_PUBLIC_CSRF_COOKIE_NAME`. Never put secrets in `NEXT_PUBLIC_` variables. Never put secrets in `NEXT_PUBLIC_` variables.
+When the backend is running, FastAPI's interactive API documentation is
+available at:
 
-## Free-tier caveats
+``` text
+http://localhost:8000/docs
+```
 
-Free plans are suitable for a hackathon demo, not an uptime guarantee:
-- Render free web services spin down when idle; free Render Postgres expires after 30 days and free local filesystem changes are not persistent.
-- Supabase Free includes 500 MB database, 5 GB egress and 1 GB storage; projects can pause after a week of low database activity.
-- Resend Free currently lists 3,000 emails/month and a 100/day limit.
-- Upstash QStash Free currently lists 1,000 messages/day.
-- Vercel Hobby is for personal/non-commercial use and has usage limits; a commercial SaaS deployment needs an eligible paid plan.
-- Razorpay Test Mode does not collect real funds.
+The deployed API documentation is available at:
 
-Verify live provider pricing, terms and quota dashboards before deployment. See `docs/deployment.md`.
+<https://odoo-subscription-management.onrender.com/docs>
 
-## Current verification note
+Use the API documentation to inspect available routes, request schemas,
+and response formats.
 
-The backend source and tests were updated in an environment without reliable outbound package-registry DNS/network access. Therefore, package installation, frontend `npm ci`/production build, live PostgreSQL concurrency tests, provider authentication and cloud deployment cannot be truthfully reported as passed here. The source includes test and deployment commands so these checks can be run in the connected development environment.
+## Security Notes
+
+-   Never commit `.env` files, database passwords, JWT secrets, payment
+    secrets, or email API keys.
+-   Rotate any credentials that have accidentally been exposed.
+-   Keep payment verification and role authorization on the backend.
+-   Use HTTPS for deployed frontend and backend communication.
+-   Restrict CORS to trusted frontend origins.
+-   Use Razorpay test mode while testing payment flows.
+
+## Project Structure
+
+The exact repository layout may differ, but the application is organized
+around separate frontend and backend components:
+
+``` text
+.
+├── backend/
+│   ├── app/
+│   ├── migrations/
+│   ├── alembic.ini
+│   └── ...
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   ├── components/
+│   │   └── lib/
+│   └── ...
+└── README.md
+```
+
+## Current Deployment Links
+
+  --------------------------------------------------------------------------------------------
+  Resource                            URL
+  ----------------------------------- --------------------------------------------------------
+  Live application                    https://odoosubsciptionmanagement.vercel.app/
+
+  Backend API                         https://odoo-subscription-management.onrender.com
+
+  API documentation                   https://odoo-subscription-management.onrender.com/docs
+  --------------------------------------------------------------------------------------------
+
+## Contributing
+
+1.  Fork the repository or create a feature branch.
+2.  Make focused changes and keep the code readable.
+3.  Test the affected frontend and backend workflows.
+4.  Submit a pull request with a clear description of the changes.
+
+## License
+
+Add the license that applies to this repository. If no license has been
+selected, the project should not be assumed to be open source for reuse.
