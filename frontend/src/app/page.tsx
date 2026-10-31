@@ -1,86 +1,1961 @@
 "use client";
-import {useCallback,useEffect,useMemo,useState} from "react";
-import {Activity,ArrowDownToLine,Bell,Boxes,CircleDollarSign,CreditCard,FileText,LayoutDashboard,LogOut,Menu,Package,Pause,Play,Plus,RefreshCw,Search,ShieldCheck,Users,X,Ban} from "lucide-react";
-import {api} from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  ArrowDownToLine,
+  Bell,
+  Boxes,
+  CircleDollarSign,
+  CreditCard,
+  FileText,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Package,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Users,
+  X,
+  Ban,
+} from "lucide-react";
+import { api } from "@/lib/api";
 import AsyncCombobox from "@/components/async-combobox";
 import AsyncMultiSelect from "@/components/async-multi-select";
-type User={id:number;email:string;full_name:string;role:"admin"|"staff"|"customer"};type Row=Record<string,unknown>&{id?:number;number?:string};
-type Section="overview"|"profile"|"customers"|"staff"|"products"|"plans"|"templates"|"quotations"|"subscriptions"|"invoices"|"payments"|"discounts"|"taxes"|"reports";
-const nav:{id:Section;label:string;icon:typeof LayoutDashboard;roles:string[]}[]=[
-{id:"overview",label:"Overview",icon:LayoutDashboard,roles:["admin","staff"]},{id:"subscriptions",label:"Subscriptions",icon:Activity,roles:["admin","staff","customer"]},{id:"profile",label:"My profile",icon:Users,roles:["customer"]},{id:"customers",label:"Customers",icon:Users,roles:["admin","staff"]},{id:"staff",label:"Team",icon:ShieldCheck,roles:["admin"]},{id:"products",label:"Products",icon:Package,roles:["admin","staff"]},{id:"plans",label:"Plans",icon:Boxes,roles:["admin","staff","customer"]},{id:"templates",label:"Quote templates",icon:FileText,roles:["admin","staff"]},{id:"quotations",label:"Quotations",icon:FileText,roles:["admin","staff","customer"]},{id:"invoices",label:"Invoices",icon:FileText,roles:["admin","staff","customer"]},{id:"payments",label:"Payments",icon:CreditCard,roles:["admin","staff","customer"]},{id:"discounts",label:"Discounts",icon:CircleDollarSign,roles:["admin","staff"]},{id:"taxes",label:"Taxes",icon:CircleDollarSign,roles:["admin","staff"]},{id:"reports",label:"Reports",icon:Activity,roles:["admin","staff"]}];
-const endpoint:Record<Section,string>={overview:"/dashboard/summary",profile:"/customers/me",customers:"/customers",staff:"/staff",products:"/products",plans:"/plans",templates:"/quotation-templates",quotations:"/quotations",subscriptions:"/subscriptions",invoices:"/invoices",payments:"/payments",discounts:"/discounts",taxes:"/taxes",reports:"/reports/monthly-revenue"};
-const pretty=(s:string)=>s.replaceAll("_"," ").replace(/\b\w/g,c=>c.toUpperCase());const inr=(v:unknown)=>`₹${Number(v??0).toLocaleString("en-IN",{maximumFractionDigits:2})}`;
-export default function Home(){
- const [token,setToken]=useState("");const [user,setUser]=useState<User|null>(null);const [section,setSection]=useState<Section>("overview");const [rows,setRows]=useState<Row[]>([]);const [summary,setSummary]=useState<Record<string,unknown>>({});const [profile,setProfile]=useState<Record<string,unknown>>({});
- const [email,setEmail]=useState("");const [password,setPassword]=useState("");const [fullName,setFullName]=useState("");const [registering,setRegistering]=useState(false);const [busy,setBusy]=useState(false);const [query,setQuery]=useState("");const [notice,setNotice]=useState("");const [bad,setBad]=useState(false);const [modal,setModal]=useState(false);const [mobile,setMobile]=useState(false);const [form,setForm]=useState<Record<string,string>>({});const [lineItems,setLineItems]=useState<{product_id:string;variant_id:string;quantity:string;unit_price:string;base_price:string;tax_rate:string}[]>([{product_id:"",variant_id:"",quantity:"1",unit_price:"",base_price:"",tax_rate:"0"}]);const [discountProductIds,setDiscountProductIds]=useState<number[]>([]);const [paymentInvoice,setPaymentInvoice]=useState<Row|null>(null);const [paymentAmount,setPaymentAmount]=useState("");const [paymentMethod,setPaymentMethod]=useState("upi");const [paymentReference,setPaymentReference]=useState("");
- const notify=(s:string,e=false)=>{setNotice(s);setBad(e);window.setTimeout(()=>setNotice(""),4000)};
- const load=useCallback(async(s:Section,t:string)=>{setBusy(true);try{const d=await api<unknown>(endpoint[s],{},t);if(s==="overview")setSummary(d as Record<string,unknown>);else if(s==="profile")setProfile(d as Record<string,unknown>);else setRows(Array.isArray(d)?d as Row[]:[])}catch(e){notify(e instanceof Error?e.message:"Unable to load",true)}finally{setBusy(false)}},[]);
- useEffect(()=>{api<User>("/auth/me").then(u=>{setUser(u);setToken("cookie-session")}).catch(()=>{setUser(null);setToken("")})},[]);
- useEffect(()=>{if(token&&user){if(!nav.find(n=>n.id===section)?.roles.includes(user.role)){setSection(user.role==="customer"?"subscriptions":"overview");return}void load(section,token)}},[token,user,section,load]);
- const login=async(e:React.FormEvent)=>{e.preventDefault();try{const path=registering?"/auth/register":"/auth/login";const payload=registering?{email,full_name:fullName,password}:{email,password};const u=await api<User>(path,{method:"POST",body:JSON.stringify(payload)});setToken("cookie-session");setUser(u);setSection(u.role==="customer"?"subscriptions":"overview");notify(registering?"Customer account created":"Signed in")}catch(e){notify(e instanceof Error?e.message:"Authentication failed",true)}};
- const logout=async()=>{try{await api("/auth/logout",{method:"POST"})}catch{}setToken("");setUser(null);setRows([])};
- const visible=nav.filter(n=>user&&n.roles.includes(user.role));const filtered=useMemo(()=>rows.filter(r=>JSON.stringify(r).toLowerCase().includes(query.toLowerCase())),[rows,query]);
- const change=(k:string,v:string)=>setForm(f=>({...f,[k]:v}));
- const create=async(e:React.FormEvent)=>{e.preventDefault();const f=form;if((section==="quotations"||section==="templates")&&!lineItems.some(x=>x.product_id)){notify("Add at least one product line",true);return}if((section==="quotations"||section==="subscriptions")&&(!f.customer_id||!f.plan_id)){notify("Select a customer and a plan from the search results",true);return}let path="",body:Record<string,unknown>={};
- if(section==="profile"){path="/customers/me";body={billing_name:f.billing_name,email:f.email,company_name:f.company_name||null,phone:f.phone||null,billing_address:f.billing_address||null,tax_id:f.tax_id||null}}
- if(section==="customers"){path="/customers";body={billing_name:f.billing_name,email:f.email,company_name:f.company_name||null,phone:f.phone||null,billing_address:f.billing_address||null}}
- if(section==="staff"){path="/staff";body={email:f.email,full_name:f.full_name,password:f.password}}
- if(section==="products"){path="/products";body={name:f.name,product_type:f.product_type||"software",sales_price:Number(f.sales_price),cost_price:Number(f.cost_price||0),notes:f.notes||null,is_active:f.is_active!=="false"}}
- if(section==="plans"){path="/plans";body={name:f.name,billing_interval:f.billing_interval||"monthly",price:Number(f.price),minimum_quantity:Number(f.minimum_quantity||1),available_from:f.available_from||null,available_until:f.available_until||null,auto_close:f.auto_close==="true",allow_early_close:f.allow_early_close!=="false",allow_pause:f.allow_pause!=="false",allow_renewal:f.allow_renewal!=="false",is_active:f.is_active!=="false"}}
- if(section==="templates"){path="/quotation-templates";body={name:f.name,validity_days:Number(f.validity_days||30),items:lineItems.filter(x=>x.product_id).map(x=>({product_id:Number(x.product_id),variant_id:x.variant_id?Number(x.variant_id):null,quantity:Number(x.quantity||1),unit_price:user.role==="admin"&&x.unit_price?Number(x.unit_price):null,tax_rate:Number(x.tax_rate||0)}))}}
- if(section==="taxes"){path="/taxes";body={name:f.name,rate:Number(f.rate),is_active:f.is_active!=="false"}}
- if(section==="discounts"){path="/discounts";body={name:f.name,kind:f.kind||"percentage",value:Number(f.value),min_purchase:Number(f.min_purchase||0),min_quantity:Number(f.min_quantity||1),max_uses:f.max_uses?Number(f.max_uses):null,starts_at:f.starts_at||null,ends_at:f.ends_at||null,product_ids:discountProductIds,is_active:f.is_active!=="false"}}
- if(section==="quotations"){path="/quotations";body={customer_id:Number(f.customer_id),plan_id:Number(f.plan_id),validity_days:Number(f.validity_days||30),items:lineItems.filter(x=>x.product_id).map(x=>({product_id:Number(x.product_id),variant_id:x.variant_id?Number(x.variant_id):null,quantity:Number(x.quantity||1),unit_price:user.role==="admin"&&x.unit_price?Number(x.unit_price):null,tax_rate:Number(x.tax_rate||0)}))}}
- if(section==="subscriptions"){path="/subscriptions";body={customer_id:Number(f.customer_id),plan_id:Number(f.plan_id),start_date:f.start_date||new Date().toISOString().slice(0,10),quantity:Number(f.quantity||1),payment_terms_days:15,items:[]}}
- try{await api(path,{method:section==="profile"?"PATCH":"POST",body:JSON.stringify(body)},token);setModal(false);setForm({});setLineItems([{product_id:"",variant_id:"",quantity:"1",unit_price:"",base_price:"",tax_rate:"0"}]);setDiscountProductIds([]);notify(section==="profile"?"Profile updated":"Record created");await load(section,token)}catch(e){notify(e instanceof Error?e.message:"Could not save",true)}};
- const recordPayment=async()=>{if(!paymentInvoice?.id)return;const amount=Number(paymentAmount);const outstanding=Number(paymentInvoice.total??0)-Number(paymentInvoice.amount_paid??0);if(!Number.isFinite(amount)||amount<=0||amount>outstanding){notify(`Enter an amount between ₹0.01 and ${inr(outstanding)}`,true);return}try{await api(`/invoices/${paymentInvoice.id}/payments`,{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({method:paymentMethod,amount,reference:paymentReference||null})},token);setPaymentInvoice(null);setPaymentAmount("");setPaymentReference("");notify("Payment recorded");await load(section,token)}catch(e){notify(e instanceof Error?e.message:"Payment could not be recorded",true)}};
- const action=async(path:string,body?:unknown)=>{try{const headers=path.endsWith("/payments")?{"Idempotency-Key":crypto.randomUUID()}:undefined;await api(path,{method:"POST",body:body?JSON.stringify(body):undefined,headers},token);notify("Action completed");await load(section,token)}catch(e){notify(e instanceof Error?e.message:"Action failed",true)}};
- const deactivate=async(path:string)=>{try{await api(path,{method:"DELETE"},token);notify("Record deactivated");await load(section,token)}catch(e){notify(e instanceof Error?e.message:"Could not deactivate",true)}};
- const download=async(id:number,name:string)=>{try{const blob=await api<Blob>(`/invoices/${id}/pdf`,{},token);const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`${name}.pdf`;a.click();URL.revokeObjectURL(url)}catch(e){notify(String(e),true)}};
- const payOnline=async(id:number)=>{try{const order=await api<{order_id:string;amount:number;currency:string;key_id:string}>(`/invoices/${id}/razorpay-order`,{method:"POST"},token);const script=document.createElement("script");script.src="https://checkout.razorpay.com/v1/checkout.js";script.onload=()=>{const Razorpay=(window as unknown as {Razorpay?:new(options:Record<string,unknown>)=>{open:()=>void}}).Razorpay;if(!Razorpay){notify("Razorpay checkout did not load",true);return}const checkout=new Razorpay({key:order.key_id,order_id:order.order_id,amount:order.amount,currency:order.currency,name:"Brightloop Software",description:`Invoice ${id}`,handler:()=>notify("Payment submitted. Invoice updates after the verified Razorpay webhook.")});checkout.open()};script.onerror=()=>notify("Could not load Razorpay checkout",true);document.body.appendChild(script)}catch(e){notify(e instanceof Error?e.message:"Online payment unavailable",true)}};
- const field=(label:string,name:string,type="text",required=false)=><label key={name} className="block text-xs font-semibold text-slate-600">{label}<input required={required} type={type} min={type==="number"?"0":undefined} value={form[name]??""} onChange={e=>change(name,e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-indigo-400"/></label>;
- const select=(label:string,name:string,options:string[])=><label key={name} className="block text-xs font-semibold text-slate-600">{label}<select value={form[name]??options[0]} onChange={e=>change(name,e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm">{options.map(o=><option key={o}>{o}</option>)}</select></label>;
- const searchable=(label:string,endpoint:string,name:string,required=true,onPick?:(option:{id:number;label:string;raw?:Record<string,unknown>}|null)=>void)=><AsyncCombobox label={label} endpoint={endpoint} required={required} value={form[name]} onSelect={option=>{change(name,option?String(option.id):"");onPick?.(option)}}/>;
- const addLine=()=>setLineItems(items=>[...items,{product_id:"",variant_id:"",quantity:"1",unit_price:"",base_price:"",tax_rate:"0"}]);
- const updateLine=(index:number,key:string,value:string)=>setLineItems(items=>items.map((item,i)=>i===index?{...item,[key]:value}:item));
- const lineEditor=(index:number)=><div key={index} className="col-span-full rounded-xl border border-slate-200 p-3"><div className="grid gap-3 sm:grid-cols-2"><AsyncCombobox label="Product" endpoint="/products" required value={lineItems[index].product_id} onSelect={o=>{updateLine(index,"product_id",o?String(o.id):"");updateLine(index,"variant_id","");updateLine(index,"base_price",o?String(o.raw?.sales_price??""):"");updateLine(index,"unit_price",o?String(o.raw?.sales_price??""):"")}}/>{lineItems[index].product_id&&<AsyncCombobox label="Variant (optional)" endpoint={`/products/${lineItems[index].product_id}/variants`} required={false} value={lineItems[index].variant_id} onSelect={o=>{updateLine(index,"variant_id",o?String(o.id):"");updateLine(index,"unit_price",String(Number(lineItems[index].base_price||0)+Number(o?.raw?.additional_price??0)))}}/>}<label className="block text-xs font-semibold text-slate-600">Quantity<input type="number" min="1" required value={lineItems[index].quantity} onChange={e=>updateLine(index,"quantity",e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal"/></label><label className="block text-xs font-semibold text-slate-600">Unit price (₹)<input type="number" min="0" step="0.01" disabled={user?.role!=="admin"} value={lineItems[index].unit_price} onChange={e=>updateLine(index,"unit_price",e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal"/></label><AsyncCombobox label="Tax rate" endpoint="/taxes" required={false} onSelect={o=>updateLine(index,"tax_rate",String(o?.raw?.rate??0))}/></div><div className="mt-2 flex items-center justify-between"><span className="text-[11px] text-slate-500">Line subtotal: {inr(Number(lineItems[index].quantity||0)*Number(lineItems[index].unit_price||0))}</span>{lineItems.length>1&&<button type="button" onClick={()=>setLineItems(items=>items.filter((_,i)=>i!==index))} className="text-xs text-rose-600">Remove line</button>}</div></div>;
- const lineTotals=lineItems.reduce((totals,line)=>{const base=Number(line.quantity||0)*Number(line.unit_price||0);const tax=base*Number(line.tax_rate||0)/100;return {subtotal:totals.subtotal+base,tax:totals.tax+tax,total:totals.total+base+tax}},{subtotal:0,tax:0,total:0});
- const lineSummary=<div className="col-span-full grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3"><div><p className="text-[11px] text-slate-500">Subtotal</p><b className="text-sm">{inr(lineTotals.subtotal)}</b></div><div><p className="text-[11px] text-slate-500">Tax</p><b className="text-sm">{inr(lineTotals.tax)}</b></div><div><p className="text-[11px] text-slate-500">Estimated total</p><b className="text-sm">{inr(lineTotals.total)}</b></div><p className="col-span-full text-[10px] text-slate-500">Preview only. The backend recalculates prices and taxes when saving; eligible discounts are applied by the billing engine.</p></div>;
- if(!user)return <main className="grid min-h-screen lg:grid-cols-2"><section className="hidden flex-col justify-between bg-[#17212b] p-12 text-white lg:flex"><b className="brand text-xl">◼ brightloop</b><div><p className="mb-5 text-xs uppercase tracking-[.25em] text-slate-400">Subscription operations</p><h1 className="max-w-lg text-5xl font-bold leading-tight">Every recurring relationship, in sync.</h1><p className="mt-6 max-w-md text-slate-300">Manage customers, plans, billing and revenue in one place.</p></div><p className="text-xs text-slate-400">Brightloop Software · Secure workspace</p></section><section className="flex items-center justify-center px-6"><form onSubmit={login} className="w-full max-w-sm"><b className="brand text-xl lg:hidden">brightloop</b><p className="mt-8 text-xs font-semibold uppercase tracking-widest text-slate-500">Welcome back</p><h2 className="mt-2 text-3xl font-bold">{registering?"Create your customer account":"Sign in to your workspace"}</h2>{registering&&<label className="mt-6 block text-sm font-semibold">Full name<input required value={fullName} onChange={e=>setFullName(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 font-normal"/></label>}<label className="mt-8 block text-sm font-semibold">Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 font-normal"/></label><label className="mt-4 block text-sm font-semibold">Password<input required type="password" value={password} onChange={e=>setPassword(e.target.value)} className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 font-normal"/></label><button className="mt-7 w-full rounded-lg bg-[#17212b] p-3 text-sm font-semibold text-white">{registering?"Create account":"Sign in"}</button><button type="button" onClick={()=>setRegistering(v=>!v)} className="mt-4 w-full text-sm text-indigo-700">{registering?"Already have an account? Sign in":"Create a customer account"}</button>{!registering&&<button type="button" onClick={async()=>{const em=prompt("Registered email");if(em){try{const d=await api<{message:string}>("/auth/forgot-password",{method:"POST",body:JSON.stringify({email:em})});notify(d.message)}catch(e){notify(String(e),true)}}}} className="mt-3 w-full text-sm text-indigo-700">Forgot password?</button>}</form></section>{notice&&<Toast text={notice} bad={bad}/>}</main>;
- const metrics=[["Customers",summary.customers,Users],["Active subscriptions",summary.active_subscriptions,Activity],["Monthly recurring revenue",inr(summary.mrr),CircleDollarSign],["Collected this month",inr(summary.collected_this_month),CreditCard]] as const;
- const adminOnly=["staff","products","plans","discounts","taxes"].includes(section);
- const canEditProfile=section==="profile"&&user.role==="customer";const creatable=(["customers","staff","products","plans","templates","quotations","subscriptions","discounts","taxes"].includes(section)&&user.role!=="customer"&&(!adminOnly||user.role==="admin"))||canEditProfile;
- return <div className="min-h-screen md:flex"><aside className={`${mobile?"fixed inset-0 z-40 block":"hidden"} w-[260px] shrink-0 border-r border-slate-200 bg-white px-5 py-6 md:sticky md:top-0 md:block md:h-screen`}><div className="mb-9 flex items-center justify-between"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-xl bg-[#17212b] font-bold text-white">b</span><div><b className="brand">brightloop</b><p className="text-[11px] text-slate-400">Subscription workspace</p></div></div><button className="md:hidden" onClick={()=>setMobile(false)}><X/></button></div><p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">Workspace</p><nav className="space-y-1">{visible.map(n=>{const I=n.icon;return <button key={n.id} onClick={()=>{setSection(n.id);setMobile(false);setQuery("")}} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${section===n.id?"bg-indigo-50 font-semibold text-indigo-700":"text-slate-600 hover:bg-slate-50"}`}><I size={17}/>{n.label}</button>})}</nav><div className="absolute bottom-6 left-5 right-5 hidden border-t border-slate-100 pt-5 md:block"><div className="flex items-center gap-3"><span className="grid h-9 w-9 place-items-center rounded-full bg-indigo-50 text-sm font-bold text-indigo-700">{user.full_name[0]}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{user.full_name}</p><p className="text-[11px] capitalize text-slate-400">{user.role}</p></div><button onClick={logout}><LogOut size={16}/></button></div></div></aside>
- <main className="min-w-0 flex-1"><header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-5 backdrop-blur md:px-9"><div className="flex items-center gap-3"><button className="md:hidden" onClick={()=>setMobile(true)}><Menu/></button><div><p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">Brightloop Software</p><h1 className="font-bold">{pretty(section)}</h1></div></div><div className="flex items-center gap-4"><span className="hidden text-xs text-emerald-700 sm:inline-flex">● API workspace</span><button onClick={()=>notify("No new notifications")}><Bell size={17}/></button><button className="md:hidden" onClick={logout}><LogOut size={17}/></button></div></header>
- <div className="mx-auto max-w-[1440px] px-5 py-8 md:px-9"><div className="mb-7 flex flex-wrap items-end justify-between gap-4"><p className="text-sm text-slate-500">{section==="overview"?"Your subscription business at a glance.":`Manage ${section} records and workflows.`}</p>{creatable&&<button onClick={()=>{setForm(section==="staff"?{password:crypto.randomUUID()+"!A"}:section==="profile"?{billing_name:String(profile.billing_name??""),email:String(profile.email??""),company_name:String(profile.company_name??""),phone:String(profile.phone??""),billing_address:String(profile.billing_address??""),tax_id:String(profile.tax_id??"")}:{ });setLineItems([{product_id:"",variant_id:"",quantity:"1",unit_price:"",base_price:"",tax_rate:"0"}]);setDiscountProductIds([]);setModal(true)}} className="inline-flex items-center gap-2 rounded-lg bg-[#17212b] px-4 py-2.5 text-xs font-semibold text-white"><Plus size={15}/> {canEditProfile?"Edit profile":`Create ${section==="staff"?"staff":section.slice(0,-1)}`}</button>}</div>
- {section==="overview"&&<><div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">{metrics.map(([label,value,Icon])=><article key={label} className="rounded-xl border border-slate-200 bg-white p-5"><div className="flex justify-between text-xs text-slate-500"><span>{label}</span><Icon size={17} className="text-indigo-600"/></div><p className="mt-5 text-2xl font-bold">{value??"—"}</p></article>)}</div><div className="mt-5 grid gap-5 xl:grid-cols-2"><article className="rounded-xl border border-slate-200 bg-white p-6"><h2 className="font-bold">Financial position</h2><div className="mt-6 grid grid-cols-2 gap-6">{[["Annual recurring revenue",inr(summary.arr)],["Outstanding balance",inr(summary.outstanding)],["New subscriptions",String(summary.new_subscriptions??0)],["Overdue invoices",String(summary.overdue_invoices??0)]].map(([l,v])=><div key={l}><p className="text-xs text-slate-500">{l}</p><b className="mt-2 block text-xl">{v}</b></div>)}</div></article><article className="rounded-xl border border-slate-200 bg-white p-6"><h2 className="font-bold">Quick actions</h2><div className="mt-4 space-y-2">{[["New customer","customers"],["New product","products"],["New subscription","subscriptions"]].map(([l,s])=><button key={s} onClick={()=>setSection(s as Section)} className="flex w-full justify-between rounded-lg border border-slate-100 px-3 py-3 text-left text-sm hover:bg-slate-50">{l}<span>↗</span></button>)}<button onClick={()=>action("/billing/run")} className="w-full rounded-lg bg-indigo-50 px-3 py-3 text-left text-sm font-semibold text-indigo-700">Run due billing now →</button></div></article></div></>}
- {section==="profile"&&<div className="max-w-2xl rounded-xl border border-slate-200 bg-white p-6"><h2 className="font-bold">Customer profile</h2><p className="mt-1 text-xs text-slate-500">Your billing contact details.</p><div className="mt-6 grid gap-5 sm:grid-cols-2">{[["Billing name",profile.billing_name],["Email",profile.email],["Company",profile.company_name],["Phone",profile.phone],["Billing address",profile.billing_address],["Tax ID",profile.tax_id]].map(([k,v])=><div key={k}><p className="text-xs text-slate-400">{k}</p><p className="mt-1 break-words text-sm font-medium">{String(v??"—")}</p></div>)}</div></div>}
- {section==="reports"&&<div className="rounded-xl border border-slate-200 bg-white p-6"><h2 className="font-bold">Monthly verified collections</h2><div className="mt-6 space-y-4">{rows.map((r,i)=><div key={i} className="flex items-center gap-4 text-xs"><span className="w-20 text-slate-500">{String(r.month)}</span><div className="h-2 flex-1 rounded-full bg-slate-100"><div className="h-full rounded-full bg-indigo-600" style={{width:`${Math.min(100,Number(r.collected??0)/Math.max(1,...rows.map(x=>Number(x.collected??0)))*100)}%`}}/></div><b className="w-28 text-right">{inr(r.collected)}</b></div>)}</div></div>}
- {section!=="overview"&&section!=="reports"&&section!=="profile"&&<div className="overflow-hidden rounded-xl border border-slate-200 bg-white"><div className="flex items-center justify-between gap-3 border-b border-slate-100 p-4"><div className="relative max-w-sm flex-1"><Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder={`Search ${section}…`} className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-xs outline-none focus:border-indigo-300"/></div><span className="text-xs text-slate-400">{filtered.length} records</span></div>{busy?<p className="p-12 text-center text-sm text-slate-400">Loading…</p>:!filtered.length?<div className="p-14 text-center"><FileText className="mx-auto text-slate-300"/><p className="mt-3 text-sm font-semibold">No records found</p><p className="mt-1 text-xs text-slate-400">Create a record or adjust your search.</p></div>:<div className="overflow-x-auto"><table className="w-full min-w-[700px] text-left text-xs"><thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400"><tr>{Object.keys(filtered[0]).filter(k=>!["id","user_id","customer_id","plan_id","subscription_id","product_id","variant_id","invoice_id","password_hash","items"].includes(k)).slice(0,7).map(k=><th key={k} className="px-5 py-3">{pretty(k)}</th>)}<th className="px-5 py-3 text-right">Actions</th></tr></thead><tbody className="divide-y divide-slate-100">{filtered.map((r,i)=><tr key={String(r.id??r.number??i)} className="hover:bg-slate-50/60">{Object.entries(r).filter(([k])=>!["id","user_id","customer_id","plan_id","subscription_id","product_id","variant_id","invoice_id","password_hash","items"].includes(k)).slice(0,7).map(([k,v])=><td key={k} className="max-w-[230px] truncate px-5 py-3.5 text-slate-600">{k==="status"?<span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px]">{String(v)}</span>:typeof v==="number"&&/(price|total|amount|paid)/i.test(k)?inr(v):String(v??"—")}</td>)}<td className="px-5 py-3 text-right"><div className="inline-flex gap-2">{section==="products"&&r.id&&user.role==="admin"&&<button onClick={()=>{const name=prompt("Variant name");const price=prompt("Additional price (INR)");if(name&&price)action(`/products/${r.id}/variants`,{name,additional_price:Number(price)})}} className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">Add variant</button>}
- {section==="staff"&&r.id&&<button onClick={()=>action(`/staff/${r.id}/deactivate`)} className="rounded bg-rose-50 px-2 py-1 text-rose-700">Disable</button>}
- {section==="plans"&&r.id&&user.role==="admin"&&<button onClick={()=>deactivate(`/plans/${r.id}`)} className="rounded bg-rose-50 px-2 py-1 text-rose-700">Disable</button>}{section==="plans"&&r.id&&user.role==="customer"&&<button onClick={()=>action("/subscriptions/request",{plan_id:Number(r.id),quantity:Number(r.minimum_quantity??1),start_date:new Date().toISOString().slice(0,10)})} className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">Request plan</button>}
- {section==="discounts"&&r.id&&user.role==="admin"&&<button onClick={()=>deactivate(`/discounts/${r.id}`)} className="rounded bg-rose-50 px-2 py-1 text-rose-700">Disable</button>}
- {section==="taxes"&&r.id&&user.role==="admin"&&<button onClick={()=>deactivate(`/taxes/${r.id}`)} className="rounded bg-rose-50 px-2 py-1 text-rose-700">Disable</button>}
- {section==="quotations"&&r.id&&user.role!=="customer"&&r.status!=="confirmed"&&<button onClick={()=>action(`/quotations/${r.id}/cancel`)} className="rounded bg-rose-50 px-2 py-1 text-rose-700">Cancel</button>}
- {section==="invoices"&&r.id&&user.role!=="customer"&&r.status==="draft"&&<button onClick={()=>action(`/invoices/${r.id}/confirm`)} className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">Confirm</button>}
- {section==="invoices"&&r.id&&user.role!=="customer"&&r.status!=="paid"&&r.status!=="cancelled"&&<button onClick={()=>action(`/invoices/${r.id}/cancel`)} className="rounded bg-rose-50 px-2 py-1 text-rose-700">Cancel</button>}
- {section==="subscriptions"&&r.id&&<>{r.status==="draft"&&user.role!=="customer"&&<button title="Confirm" onClick={()=>action(`/subscriptions/${r.id}/action/confirm`)} className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">Confirm</button>}{r.status==="confirmed"&&user.role!=="customer"&&<button title="Activate" onClick={()=>action(`/subscriptions/${r.id}/action/activate`)} className="rounded bg-emerald-50 px-2 py-1 text-emerald-700">Activate</button>}{r.status==="active"&&r.allow_pause!==false&&<button title="Pause" onClick={()=>action(`/subscriptions/${r.id}/action/pause`)}><Pause size={14}/></button>}{r.status==="paused"&&r.allow_pause!==false&&<button title="Resume" onClick={()=>action(`/subscriptions/${r.id}/action/resume`)}><Play size={14}/></button>}{r.status==="active"&&r.allow_renewal!==false&&<button title="Renew" onClick={()=>action(`/subscriptions/${r.id}/action/renew`)}><RefreshCw size={14}/></button>}{r.status==="active"&&r.expiry_date&&String(r.expiry_date)<new Date().toISOString().slice(0,10)&&user.role!=="customer"&&<button title="Expire" onClick={()=>action(`/subscriptions/${r.id}/action/expire`)}><Ban size={14}/></button>}{["active","paused","confirmed"].includes(String(r.status))&&r.allow_early_close!==false&&<button title="Close" onClick={()=>action(`/subscriptions/${r.id}/action/close`)}><Ban size={14}/></button>}</>}{section==="quotations"&&r.id&&user.role!=="customer"&&<button onClick={()=>action(`/quotations/${r.id}/convert`)} className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">Convert</button>}{section==="invoices"&&r.id&&<><button title="Download PDF" onClick={()=>download(Number(r.id),String(r.number??"invoice"))}><ArrowDownToLine size={14}/></button>{r.status!=="paid"&&r.status!=="cancelled"&&<button onClick={()=>payOnline(Number(r.id))} className="rounded bg-indigo-50 px-2 py-1 text-indigo-700">Pay online</button>}{user.role!=="customer"&&<>{r.status!=="paid"&&r.status!=="cancelled"&&r.status!=="draft"&&<button onClick={()=>{setPaymentInvoice(r);setPaymentAmount(String(Math.max(0,Number(r.total??0)-Number(r.amount_paid??0))));setPaymentMethod("upi");setPaymentReference("")}} className="rounded bg-slate-100 px-2 py-1 text-slate-700">Record payment</button>}<button onClick={()=>action(`/invoices/${r.id}/send`)} className="rounded bg-slate-100 px-2 py-1 text-slate-700">Email</button></>}</>}</div></td></tr>)}</tbody></table></div>}</div>}
- </div></main>
- {modal&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"><div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-2xl bg-white p-6"><div className="mb-5 flex justify-between"><h2 className="font-bold">{canEditProfile?"Edit profile":`Create ${section==="staff"?"staff member":section.slice(0,-1)}`}</h2><button onClick={()=>setModal(false)}><X size={18}/></button></div><form onSubmit={create} className="grid gap-4 sm:grid-cols-2">
- {(section==="customers"||section==="profile")&&<>{field("Billing name","billing_name","text",true)}{field("Email","email","email",true)}{field("Company","company_name")}{field("Phone","phone")}{field("Billing address","billing_address")}{field("Tax ID","tax_id")}</>}
- {section==="staff"&&<>{field("Full name","full_name","text",true)}{field("Email","email","email",true)}{field("Temporary password","password","text",true)}<div className="col-span-full flex gap-2"><button type="button" onClick={()=>change("password",crypto.randomUUID()+"!A")} className="rounded-lg border border-slate-200 px-3 py-2 text-xs">Regenerate password</button><button type="button" onClick={()=>{void navigator.clipboard.writeText(form.password??"");notify("Temporary password copied")}} className="rounded-lg border border-slate-200 px-3 py-2 text-xs">Copy password</button></div></>}
- {section==="products"&&<>{field("Product name","name","text",true)}{select("Product type","product_type",["software","service","goods"])}{field("Sales price (₹)","sales_price","number",true)}{field("Cost price (₹)","cost_price","number")}{field("Notes","notes")}<label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.is_active!=="false"} onChange={e=>change("is_active",String(e.target.checked))}/> Active product</label></>}
- {section==="templates"&&<>{field("Template name","name","text",true)}{field("Validity days","validity_days","number")}{lineItems.map((_,i)=>lineEditor(i))}<div className="col-span-full"><button type="button" onClick={addLine} className="text-xs font-semibold text-indigo-700">+ Add product line</button></div>{lineSummary}</>}
- {section==="plans"&&<>{field("Plan name","name","text",true)}{select("Billing interval","billing_interval",["daily","weekly","monthly","yearly"])}{field("Price (₹)","price","number",true)}{field("Minimum quantity","minimum_quantity","number")}{field("Available from","available_from","date")}{field("Available until","available_until","date")}<label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.auto_close==="true"} onChange={e=>change("auto_close",String(e.target.checked))}/> Automatically close at expiry</label><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.allow_early_close!=="false"} onChange={e=>change("allow_early_close",String(e.target.checked))}/> Allow early closure</label><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.allow_pause!=="false"} onChange={e=>change("allow_pause",String(e.target.checked))}/> Allow pause</label><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.allow_renewal!=="false"} onChange={e=>change("allow_renewal",String(e.target.checked))}/> Allow renewal</label><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.is_active!=="false"} onChange={e=>change("is_active",String(e.target.checked))}/> Active plan</label></>}
- {section==="taxes"&&<>{field("Tax name","name","text",true)}<label className="block text-xs font-semibold text-slate-600">Common rate preset<select value={form.rate_preset??"18"} onChange={e=>{change("rate_preset",e.target.value);if(e.target.value!=="custom")change("rate",e.target.value)}} className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="0">0%</option><option value="5">5%</option><option value="12">12%</option><option value="18">18%</option><option value="28">28%</option><option value="custom">Custom rate</option></select></label>{field("Rate %","rate","number",true)}<label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.is_active!=="false"} onChange={e=>change("is_active",String(e.target.checked))}/> Active tax</label></>}
- {section==="discounts"&&<>{field("Name","name","text",true)}{select("Type","kind",["percentage","fixed"])}{field(form.kind==="fixed"?"Value (₹)":"Value (%)","value","number",true)}{field("Minimum purchase (₹)","min_purchase","number")}{field("Minimum quantity","min_quantity","number")}{field("Maximum uses","max_uses","number")}{field("Starts on","starts_at","date")}{field("Ends on","ends_at","date")}<AsyncMultiSelect label="Applicable products (optional)" endpoint="/products" value={discountProductIds} onChange={setDiscountProductIds}/><label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={form.is_active!=="false"} onChange={e=>change("is_active",String(e.target.checked))}/> Active discount</label></>}
- {(section==="quotations"||section==="subscriptions")&&<>{searchable("Customer","/customers","customer_id",true)}{searchable("Plan","/plans","plan_id",true,o=>{if(o?.raw?.minimum_quantity)change("quantity",String(o.raw.minimum_quantity))})}{section==="quotations"?<>{lineItems.map((_,i)=>lineEditor(i))}<div className="col-span-full"><button type="button" onClick={addLine} className="text-xs font-semibold text-indigo-700">+ Add product line</button></div>{lineSummary}{field("Validity days","validity_days","number")}</>:<>{field("Start date","start_date","date")}{field("Quantity","quantity","number")}</>}</>}
- <div className="col-span-full flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={()=>setModal(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold">Cancel</button><button className="rounded-lg bg-[#17212b] px-4 py-2 text-xs font-semibold text-white">Save</button></div></form></div></div>}
- {paymentInvoice&&<div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/40 p-4"><div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"><div className="mb-5 flex items-start justify-between"><div><h2 className="font-bold">Record payment</h2><p className="mt-1 text-xs text-slate-500">Invoice {String(paymentInvoice.number??`#${paymentInvoice.id}`)}</p></div><button type="button" onClick={()=>setPaymentInvoice(null)}><X size={18}/></button></div><div className="mb-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3"><div><p className="text-[11px] text-slate-500">Invoice total</p><b>{inr(paymentInvoice.total)}</b></div><div><p className="text-[11px] text-slate-500">Already paid</p><b>{inr(paymentInvoice.amount_paid)}</b></div><div className="col-span-2"><p className="text-[11px] text-slate-500">Outstanding balance</p><b className="text-lg">{inr(Number(paymentInvoice.total??0)-Number(paymentInvoice.amount_paid??0))}</b></div></div><div className="space-y-3"><label className="block text-xs font-semibold text-slate-600">Payment amount (₹)<input type="number" min="0.01" max={Math.max(0,Number(paymentInvoice.total??0)-Number(paymentInvoice.amount_paid??0))} step="0.01" required value={paymentAmount} onChange={e=>setPaymentAmount(e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm"/></label><label className="block text-xs font-semibold text-slate-600">Payment method<select value={paymentMethod} onChange={e=>setPaymentMethod(e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm"><option value="upi">UPI</option><option value="bank_transfer">Bank transfer</option><option value="cash">Cash</option><option value="card">Card</option><option value="other">Other</option></select></label><label className="block text-xs font-semibold text-slate-600">Reference (optional)<input value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm" placeholder="Transaction reference"/></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={()=>setPaymentInvoice(null)} className="rounded-lg border border-slate-200 px-4 py-2 text-xs">Cancel</button><button type="button" onClick={recordPayment} className="rounded-lg bg-[#17212b] px-4 py-2 text-xs font-semibold text-white">Record payment</button></div></div></div>}
- {notice&&<div role="status" className={`fixed bottom-5 right-5 z-[60] rounded-xl px-4 py-3 text-sm text-white shadow-xl ${bad?"bg-rose-600":"bg-emerald-700"}`}>{notice}</div>}
- </div>
+type User = {
+  id: number;
+  email: string;
+  full_name: string;
+  role: "admin" | "staff" | "customer";
+};
+type Row = Record<string, unknown> & { id?: number; number?: string };
+type Section =
+  | "overview"
+  | "profile"
+  | "customers"
+  | "staff"
+  | "products"
+  | "plans"
+  | "templates"
+  | "quotations"
+  | "subscriptions"
+  | "invoices"
+  | "payments"
+  | "discounts"
+  | "taxes"
+  | "reports";
+const nav: {
+  id: Section;
+  label: string;
+  icon: typeof LayoutDashboard;
+  roles: string[];
+}[] = [
+  {
+    id: "overview",
+    label: "Overview",
+    icon: LayoutDashboard,
+    roles: ["admin", "staff"],
+  },
+  {
+    id: "subscriptions",
+    label: "Subscriptions",
+    icon: Activity,
+    roles: ["admin", "staff", "customer"],
+  },
+  { id: "profile", label: "My profile", icon: Users, roles: ["customer"] },
+  {
+    id: "customers",
+    label: "Customers",
+    icon: Users,
+    roles: ["admin", "staff"],
+  },
+  { id: "staff", label: "Team", icon: ShieldCheck, roles: ["admin"] },
+  {
+    id: "products",
+    label: "Products",
+    icon: Package,
+    roles: ["admin", "staff"],
+  },
+  {
+    id: "plans",
+    label: "Plans",
+    icon: Boxes,
+    roles: ["admin", "staff", "customer"],
+  },
+  {
+    id: "templates",
+    label: "Quote templates",
+    icon: FileText,
+    roles: ["admin", "staff"],
+  },
+  {
+    id: "quotations",
+    label: "Quotations",
+    icon: FileText,
+    roles: ["admin", "staff", "customer"],
+  },
+  {
+    id: "invoices",
+    label: "Invoices",
+    icon: FileText,
+    roles: ["admin", "staff", "customer"],
+  },
+  {
+    id: "payments",
+    label: "Payments",
+    icon: CreditCard,
+    roles: ["admin", "staff", "customer"],
+  },
+  {
+    id: "discounts",
+    label: "Discounts",
+    icon: CircleDollarSign,
+    roles: ["admin", "staff"],
+  },
+  {
+    id: "taxes",
+    label: "Taxes",
+    icon: CircleDollarSign,
+    roles: ["admin", "staff"],
+  },
+  {
+    id: "reports",
+    label: "Reports",
+    icon: Activity,
+    roles: ["admin", "staff"],
+  },
+];
+const endpoint: Record<Section, string> = {
+  overview: "/dashboard/summary",
+  profile: "/customers/me",
+  customers: "/customers",
+  staff: "/staff",
+  products: "/products",
+  plans: "/plans",
+  templates: "/quotation-templates",
+  quotations: "/quotations",
+  subscriptions: "/subscriptions",
+  invoices: "/invoices",
+  payments: "/payments",
+  discounts: "/discounts",
+  taxes: "/taxes",
+  reports: "/reports/monthly-revenue",
+};
+const pretty = (s: string) =>
+  s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const inr = (v: unknown) =>
+  `₹${Number(v ?? 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+export default function Home() {
+  const [token, setToken] = useState("");
+  const [user, setUser] = useState<User | null>(null);
+  const [section, setSection] = useState<Section>("overview");
+  const [rows, setRows] = useState<Row[]>([]);
+  const [summary, setSummary] = useState<Record<string, unknown>>({});
+  const [profile, setProfile] = useState<Record<string, unknown>>({});
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [registering, setRegistering] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState("");
+  const [notice, setNotice] = useState("");
+  const [bad, setBad] = useState(false);
+  const [modal, setModal] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [lineItems, setLineItems] = useState<
+    {
+      product_id: string;
+      variant_id: string;
+      quantity: string;
+      unit_price: string;
+      base_price: string;
+      tax_rate: string;
+    }[]
+  >([
+    {
+      product_id: "",
+      variant_id: "",
+      quantity: "1",
+      unit_price: "",
+      base_price: "",
+      tax_rate: "0",
+    },
+  ]);
+  const [discountProductIds, setDiscountProductIds] = useState<number[]>([]);
+  const [paymentInvoice, setPaymentInvoice] = useState<Row | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("upi");
+  const [paymentReference, setPaymentReference] = useState("");
+  const notify = (s: string, e = false) => {
+    setNotice(s);
+    setBad(e);
+    window.setTimeout(() => setNotice(""), 4000);
+  };
+  const load = useCallback(async (s: Section, t: string) => {
+    setBusy(true);
+    try {
+      const d = await api<unknown>(endpoint[s], {}, t);
+      if (s === "overview") setSummary(d as Record<string, unknown>);
+      else if (s === "profile") setProfile(d as Record<string, unknown>);
+      else setRows(Array.isArray(d) ? (d as Row[]) : []);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Unable to load", true);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  useEffect(() => {
+    api<User>("/auth/me")
+      .then((u) => {
+        setUser(u);
+        setToken("cookie-session");
+      })
+      .catch(() => {
+        setUser(null);
+        setToken("");
+      });
+  }, []);
+  useEffect(() => {
+    if (token && user) {
+      if (!nav.find((n) => n.id === section)?.roles.includes(user.role)) {
+        setSection(user.role === "customer" ? "subscriptions" : "overview");
+        return;
+      }
+      void load(section, token);
+    }
+  }, [token, user, section, load]);
+  const login = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const path = registering ? "/auth/register" : "/auth/login";
+      const payload = registering
+        ? { email, full_name: fullName, password }
+        : { email, password };
+      const u = await api<User>(path, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setToken("cookie-session");
+      setUser(u);
+      setSection(u.role === "customer" ? "subscriptions" : "overview");
+      notify(registering ? "Customer account created" : "Signed in");
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Authentication failed", true);
+    }
+  };
+  const logout = async () => {
+    try {
+      await api("/auth/logout", { method: "POST" });
+    } catch {}
+    setToken("");
+    setUser(null);
+    setRows([]);
+  };
+  const visible = nav.filter((n) => user && n.roles.includes(user.role));
+  const filtered = useMemo(
+    () =>
+      rows.filter((r) =>
+        JSON.stringify(r).toLowerCase().includes(query.toLowerCase()),
+      ),
+    [rows, query],
+  );
+  const change = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+    notify("Please login first", true);
+    return;
+  }
+    const f = form;
+    if (
+      (section === "quotations" || section === "templates") &&
+      !lineItems.some((x) => x.product_id)
+    ) {
+      notify("Add at least one product line", true);
+      return;
+    }
+    if (
+      (section === "quotations" || section === "subscriptions") &&
+      (!f.customer_id || !f.plan_id)
+    ) {
+      notify("Select a customer and a plan from the search results", true);
+      return;
+    }
+    let path = "",
+      body: Record<string, unknown> = {};
+    if (section === "profile") {
+      path = "/customers/me";
+      body = {
+        billing_name: f.billing_name,
+        email: f.email,
+        company_name: f.company_name || null,
+        phone: f.phone || null,
+        billing_address: f.billing_address || null,
+        tax_id: f.tax_id || null,
+      };
+    }
+    if (section === "customers") {
+      path = "/customers";
+      body = {
+        billing_name: f.billing_name,
+        email: f.email,
+        company_name: f.company_name || null,
+        phone: f.phone || null,
+        billing_address: f.billing_address || null,
+      };
+    }
+    if (section === "staff") {
+      path = "/staff";
+      body = { email: f.email, full_name: f.full_name, password: f.password };
+    }
+    if (section === "products") {
+      path = "/products";
+      body = {
+        name: f.name,
+        product_type: f.product_type || "software",
+        sales_price: Number(f.sales_price),
+        cost_price: Number(f.cost_price || 0),
+        notes: f.notes || null,
+        is_active: f.is_active !== "false",
+      };
+    }
+    if (section === "plans") {
+      path = "/plans";
+      body = {
+        name: f.name,
+        billing_interval: f.billing_interval || "monthly",
+        price: Number(f.price),
+        minimum_quantity: Number(f.minimum_quantity || 1),
+        available_from: f.available_from || null,
+        available_until: f.available_until || null,
+        auto_close: f.auto_close === "true",
+        allow_early_close: f.allow_early_close !== "false",
+        allow_pause: f.allow_pause !== "false",
+        allow_renewal: f.allow_renewal !== "false",
+        is_active: f.is_active !== "false",
+      };
+    }
+    if (section === "templates") {
+      path = "/quotation-templates";
+      body = {
+        name: f.name,
+        validity_days: Number(f.validity_days || 30),
+        items: lineItems
+          .filter((x) => x.product_id)
+          .map((x) => ({
+            product_id: Number(x.product_id),
+            variant_id: x.variant_id ? Number(x.variant_id) : null,
+            quantity: Number(x.quantity || 1),
+            unit_price:
+            
+              user.role === "admin" && x.unit_price
+                ? Number(x.unit_price)
+                : null,
+            tax_rate: Number(x.tax_rate || 0),
+          })),
+      };
+    }
+    if (section === "taxes") {
+      path = "/taxes";
+      body = {
+        name: f.name,
+        rate: Number(f.rate),
+        is_active: f.is_active !== "false",
+      };
+    }
+    if (section === "discounts") {
+      path = "/discounts";
+      body = {
+        name: f.name,
+        kind: f.kind || "percentage",
+        value: Number(f.value),
+        min_purchase: Number(f.min_purchase || 0),
+        min_quantity: Number(f.min_quantity || 1),
+        max_uses: f.max_uses ? Number(f.max_uses) : null,
+        starts_at: f.starts_at || null,
+        ends_at: f.ends_at || null,
+        product_ids: discountProductIds,
+        is_active: f.is_active !== "false",
+      };
+    }
+    if (section === "quotations") {
+      path = "/quotations";
+      body = {
+        customer_id: Number(f.customer_id),
+        plan_id: Number(f.plan_id),
+        validity_days: Number(f.validity_days || 30),
+        items: lineItems
+          .filter((x) => x.product_id)
+          .map((x) => ({
+            product_id: Number(x.product_id),
+            variant_id: x.variant_id ? Number(x.variant_id) : null,
+            quantity: Number(x.quantity || 1),
+            unit_price:
+              user.role === "admin" && x.unit_price
+                ? Number(x.unit_price)
+                : null,
+            tax_rate: Number(x.tax_rate || 0),
+          })),
+      };
+    }
+    if (section === "subscriptions") {
+      path = "/subscriptions";
+      body = {
+        customer_id: Number(f.customer_id),
+        plan_id: Number(f.plan_id),
+        start_date: f.start_date || new Date().toISOString().slice(0, 10),
+        quantity: Number(f.quantity || 1),
+        payment_terms_days: 15,
+        items: [],
+      };
+    }
+    try {
+      await api(
+        path,
+        {
+          method: section === "profile" ? "PATCH" : "POST",
+          body: JSON.stringify(body),
+        },
+        token,
+      );
+      setModal(false);
+      setForm({});
+      setLineItems([
+        {
+          product_id: "",
+          variant_id: "",
+          quantity: "1",
+          unit_price: "",
+          base_price: "",
+          tax_rate: "0",
+        },
+      ]);
+      setDiscountProductIds([]);
+      notify(section === "profile" ? "Profile updated" : "Record created");
+      await load(section, token);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Could not save", true);
+    }
+  };
+  const recordPayment = async () => {
+    if (!paymentInvoice?.id) return;
+    const amount = Number(paymentAmount);
+    const outstanding =
+      Number(paymentInvoice.total ?? 0) -
+      Number(paymentInvoice.amount_paid ?? 0);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > outstanding) {
+      notify(`Enter an amount between ₹0.01 and ${inr(outstanding)}`, true);
+      return;
+    }
+    try {
+      await api(
+        `/invoices/${paymentInvoice.id}/payments`,
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": crypto.randomUUID() },
+          body: JSON.stringify({
+            method: paymentMethod,
+            amount,
+            reference: paymentReference || null,
+          }),
+        },
+        token,
+      );
+      setPaymentInvoice(null);
+      setPaymentAmount("");
+      setPaymentReference("");
+      notify("Payment recorded");
+      await load(section, token);
+    } catch (e) {
+      notify(
+        e instanceof Error ? e.message : "Payment could not be recorded",
+        true,
+      );
+    }
+  };
+  const action = async (path: string, body?: unknown) => {
+    try {
+      const headers = path.endsWith("/payments")
+        ? { "Idempotency-Key": crypto.randomUUID() }
+        : undefined;
+      await api(
+        path,
+        {
+          method: "POST",
+          body: body ? JSON.stringify(body) : undefined,
+          headers,
+        },
+        token,
+      );
+      notify("Action completed");
+      await load(section, token);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Action failed", true);
+    }
+  };
+  const deactivate = async (path: string) => {
+    try {
+      await api(path, { method: "DELETE" }, token);
+      notify("Record deactivated");
+      await load(section, token);
+    } catch (e) {
+      notify(e instanceof Error ? e.message : "Could not deactivate", true);
+    }
+  };
+  const download = async (id: number, name: string) => {
+    try {
+      const blob = await api<Blob>(`/invoices/${id}/pdf`, {}, token);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${name}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      notify(String(e), true);
+    }
+  };
+  const payOnline = async (id: number) => {
+    try {
+      const order = await api<{
+        order_id: string;
+        amount: number;
+        currency: string;
+        key_id: string;
+      }>(`/invoices/${id}/razorpay-order`, { method: "POST" }, token);
+      const script = document.createElement("script");
+      script.src = "https://checkout.razorpay.com/v1/checkout.js";
+      script.onload = () => {
+        const Razorpay = (
+          window as unknown as {
+            Razorpay?: new (options: Record<string, unknown>) => {
+              open: () => void;
+            };
+          }
+        ).Razorpay;
+        if (!Razorpay) {
+          notify("Razorpay checkout did not load", true);
+          return;
+        }
+        const checkout = new Razorpay({
+          key: order.key_id,
+          order_id: order.order_id,
+          amount: order.amount,
+          currency: order.currency,
+          name: "Brightloop Software",
+          description: `Invoice ${id}`,
+          handler: () =>
+            notify(
+              "Payment submitted. Invoice updates after the verified Razorpay webhook.",
+            ),
+        });
+        checkout.open();
+      };
+      script.onerror = () => notify("Could not load Razorpay checkout", true);
+      document.body.appendChild(script);
+    } catch (e) {
+      notify(
+        e instanceof Error ? e.message : "Online payment unavailable",
+        true,
+      );
+    }
+  };
+  const field = (
+    label: string,
+    name: string,
+    type = "text",
+    required = false,
+  ) => (
+    <label key={name} className="block text-xs font-semibold text-slate-600">
+      {label}
+      <input
+        required={required}
+        type={type}
+        min={type === "number" ? "0" : undefined}
+        value={form[name] ?? ""}
+        onChange={(e) => change(name, e.target.value)}
+        className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-indigo-400"
+      />
+    </label>
+  );
+  const select = (label: string, name: string, options: string[]) => (
+    <label key={name} className="block text-xs font-semibold text-slate-600">
+      {label}
+      <select
+        value={form[name] ?? options[0]}
+        onChange={(e) => change(name, e.target.value)}
+        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm"
+      >
+        {options.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
+      </select>
+    </label>
+  );
+  const searchable = (
+    label: string,
+    endpoint: string,
+    name: string,
+    required = true,
+    onPick?: (
+      option: {
+        id: number;
+        label: string;
+        raw?: Record<string, unknown>;
+      } | null,
+    ) => void,
+  ) => (
+    <AsyncCombobox
+      label={label}
+      endpoint={endpoint}
+      required={required}
+      value={form[name]}
+      onSelect={(option) => {
+        change(name, option ? String(option.id) : "");
+        onPick?.(option);
+      }}
+    />
+  );
+  const addLine = () =>
+    setLineItems((items) => [
+      ...items,
+      {
+        product_id: "",
+        variant_id: "",
+        quantity: "1",
+        unit_price: "",
+        base_price: "",
+        tax_rate: "0",
+      },
+    ]);
+  const updateLine = (index: number, key: string, value: string) =>
+    setLineItems((items) =>
+      items.map((item, i) => (i === index ? { ...item, [key]: value } : item)),
+    );
+  const lineEditor = (index: number) => (
+    <div
+      key={index}
+      className="col-span-full rounded-xl border border-slate-200 p-3"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <AsyncCombobox
+          label="Product"
+          endpoint="/products"
+          required
+          value={lineItems[index].product_id}
+          onSelect={(o) => {
+            updateLine(index, "product_id", o ? String(o.id) : "");
+            updateLine(index, "variant_id", "");
+            updateLine(
+              index,
+              "base_price",
+              o ? String(o.raw?.sales_price ?? "") : "",
+            );
+            updateLine(
+              index,
+              "unit_price",
+              o ? String(o.raw?.sales_price ?? "") : "",
+            );
+          }}
+        />
+        {lineItems[index].product_id && (
+          <AsyncCombobox
+            label="Variant (optional)"
+            endpoint={`/products/${lineItems[index].product_id}/variants`}
+            required={false}
+            value={lineItems[index].variant_id}
+            onSelect={(o) => {
+              updateLine(index, "variant_id", o ? String(o.id) : "");
+              updateLine(
+                index,
+                "unit_price",
+                String(
+                  Number(lineItems[index].base_price || 0) +
+                    Number(o?.raw?.additional_price ?? 0),
+                ),
+              );
+            }}
+          />
+        )}
+        <label className="block text-xs font-semibold text-slate-600">
+          Quantity
+          <input
+            type="number"
+            min="1"
+            required
+            value={lineItems[index].quantity}
+            onChange={(e) => updateLine(index, "quantity", e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal"
+          />
+        </label>
+        <label className="block text-xs font-semibold text-slate-600">
+          Unit price (₹)
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            disabled={user?.role !== "admin"}
+            value={lineItems[index].unit_price}
+            onChange={(e) => updateLine(index, "unit_price", e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm font-normal"
+          />
+        </label>
+        <AsyncCombobox
+          label="Tax rate"
+          endpoint="/taxes"
+          required={false}
+          onSelect={(o) =>
+            updateLine(index, "tax_rate", String(o?.raw?.rate ?? 0))
+          }
+        />
+      </div>
+      <div className="mt-2 flex items-center justify-between">
+        <span className="text-[11px] text-slate-500">
+          Line subtotal:{" "}
+          {inr(
+            Number(lineItems[index].quantity || 0) *
+              Number(lineItems[index].unit_price || 0),
+          )}
+        </span>
+        {lineItems.length > 1 && (
+          <button
+            type="button"
+            onClick={() =>
+              setLineItems((items) => items.filter((_, i) => i !== index))
+            }
+            className="text-xs text-rose-600"
+          >
+            Remove line
+          </button>
+        )}
+      </div>
+    </div>
+  );
+  const lineTotals = lineItems.reduce(
+    (totals, line) => {
+      const base = Number(line.quantity || 0) * Number(line.unit_price || 0);
+      const tax = (base * Number(line.tax_rate || 0)) / 100;
+      return {
+        subtotal: totals.subtotal + base,
+        tax: totals.tax + tax,
+        total: totals.total + base + tax,
+      };
+    },
+    { subtotal: 0, tax: 0, total: 0 },
+  );
+  const lineSummary = (
+    <div className="col-span-full grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3">
+      <div>
+        <p className="text-[11px] text-slate-500">Subtotal</p>
+        <b className="text-sm">{inr(lineTotals.subtotal)}</b>
+      </div>
+      <div>
+        <p className="text-[11px] text-slate-500">Tax</p>
+        <b className="text-sm">{inr(lineTotals.tax)}</b>
+      </div>
+      <div>
+        <p className="text-[11px] text-slate-500">Estimated total</p>
+        <b className="text-sm">{inr(lineTotals.total)}</b>
+      </div>
+      <p className="col-span-full text-[10px] text-slate-500">
+        Preview only. The backend recalculates prices and taxes when saving;
+        eligible discounts are applied by the billing engine.
+      </p>
+    </div>
+  );
+  if (!user)
+    return (
+      <main className="grid min-h-screen lg:grid-cols-2">
+        <section className="hidden flex-col justify-between bg-[#17212b] p-12 text-white lg:flex">
+          <b className="brand text-xl">◼ brightloop</b>
+          <div>
+            <p className="mb-5 text-xs uppercase tracking-[.25em] text-slate-400">
+              Subscription operations
+            </p>
+            <h1 className="max-w-lg text-5xl font-bold leading-tight">
+              Every recurring relationship, in sync.
+            </h1>
+            <p className="mt-6 max-w-md text-slate-300">
+              Manage customers, plans, billing and revenue in one place.
+            </p>
+          </div>
+          <p className="text-xs text-slate-400">
+            Brightloop Software · Secure workspace
+          </p>
+        </section>
+        <section className="flex items-center justify-center px-6">
+          <form onSubmit={login} className="w-full max-w-sm">
+            <b className="brand text-xl lg:hidden">brightloop</b>
+            <p className="mt-8 text-xs font-semibold uppercase tracking-widest text-slate-500">
+              Welcome back
+            </p>
+            <h2 className="mt-2 text-3xl font-bold">
+              {registering
+                ? "Create your customer account"
+                : "Sign in to your workspace"}
+            </h2>
+            {registering && (
+              <label className="mt-6 block text-sm font-semibold">
+                Full name
+                <input
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 font-normal"
+                />
+              </label>
+            )}
+            <label className="mt-8 block text-sm font-semibold">
+              Email
+              <input
+                required
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 font-normal"
+              />
+            </label>
+            <label className="mt-4 block text-sm font-semibold">
+              Password
+              <input
+                required
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-2 w-full rounded-lg border border-slate-200 bg-white p-3 font-normal"
+              />
+            </label>
+            <button className="mt-7 w-full rounded-lg bg-[#17212b] p-3 text-sm font-semibold text-white">
+              {registering ? "Create account" : "Sign in"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setRegistering((v) => !v)}
+              className="mt-4 w-full text-sm text-indigo-700"
+            >
+              {registering
+                ? "Already have an account? Sign in"
+                : "Create a customer account"}
+            </button>
+            {!registering && (
+              <button
+                type="button"
+                onClick={async () => {
+                  const em = prompt("Registered email");
+                  if (em) {
+                    try {
+                      const d = await api<{ message: string }>(
+                        "/auth/forgot-password",
+                        { method: "POST", body: JSON.stringify({ email: em }) },
+                      );
+                      notify(d.message);
+                    } catch (e) {
+                      notify(String(e), true);
+                    }
+                  }
+                }}
+                className="mt-3 w-full text-sm text-indigo-700"
+              >
+                Forgot password?
+              </button>
+            )}
+          </form>
+        </section>
+        {notice && <Toast text={notice} bad={bad} />}
+      </main>
+    );
+  const metrics = [
+    ["Customers", summary.customers, Users],
+    ["Active subscriptions", summary.active_subscriptions, Activity],
+    ["Monthly recurring revenue", inr(summary.mrr), CircleDollarSign],
+    ["Collected this month", inr(summary.collected_this_month), CreditCard],
+  ] as const;
+  const adminOnly = [
+    "staff",
+    "products",
+    "plans",
+    "discounts",
+    "taxes",
+  ].includes(section);
+  const canEditProfile = section === "profile" && user.role === "customer";
+  const creatable =
+    ([
+      "customers",
+      "staff",
+      "products",
+      "plans",
+      "templates",
+      "quotations",
+      "subscriptions",
+      "discounts",
+      "taxes",
+    ].includes(section) &&
+      user.role !== "customer" &&
+      (!adminOnly || user.role === "admin")) ||
+    canEditProfile;
+  return (
+    <div className="min-h-screen md:flex">
+      <aside
+        className={`${mobile ? "fixed inset-0 z-40 block" : "hidden"} w-[260px] shrink-0 border-r border-slate-200 bg-white px-5 py-6 md:sticky md:top-0 md:block md:h-screen`}
+      >
+        <div className="mb-9 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#17212b] font-bold text-white">
+              b
+            </span>
+            <div>
+              <b className="brand">brightloop</b>
+              <p className="text-[11px] text-slate-400">
+                Subscription workspace
+              </p>
+            </div>
+          </div>
+          <button className="md:hidden" onClick={() => setMobile(false)}>
+            <X />
+          </button>
+        </div>
+        <p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Workspace
+        </p>
+        <nav className="space-y-1">
+          {visible.map((n) => {
+            const I = n.icon;
+            return (
+              <button
+                key={n.id}
+                onClick={() => {
+                  setSection(n.id);
+                  setMobile(false);
+                  setQuery("");
+                }}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${section === n.id ? "bg-indigo-50 font-semibold text-indigo-700" : "text-slate-600 hover:bg-slate-50"}`}
+              >
+                <I size={17} />
+                {n.label}
+              </button>
+            );
+          })}
+        </nav>
+        <div className="absolute bottom-6 left-5 right-5 hidden border-t border-slate-100 pt-5 md:block">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-indigo-50 text-sm font-bold text-indigo-700">
+              {user.full_name[0]}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold">{user.full_name}</p>
+              <p className="text-[11px] capitalize text-slate-400">
+                {user.role}
+              </p>
+            </div>
+            <button onClick={logout}>
+              <LogOut size={16} />
+            </button>
+          </div>
+        </div>
+      </aside>
+      <main className="min-w-0 flex-1">
+        <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-slate-200 bg-white/95 px-5 backdrop-blur md:px-9">
+          <div className="flex items-center gap-3">
+            <button className="md:hidden" onClick={() => setMobile(true)}>
+              <Menu />
+            </button>
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400">
+                Brightloop Software
+              </p>
+              <h1 className="font-bold">{pretty(section)}</h1>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="hidden text-xs text-emerald-700 sm:inline-flex">
+              ● API workspace
+            </span>
+            <button onClick={() => notify("No new notifications")}>
+              <Bell size={17} />
+            </button>
+            <button className="md:hidden" onClick={logout}>
+              <LogOut size={17} />
+            </button>
+          </div>
+        </header>
+        <div className="mx-auto max-w-[1440px] px-5 py-8 md:px-9">
+          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+            <p className="text-sm text-slate-500">
+              {section === "overview"
+                ? "Your subscription business at a glance."
+                : `Manage ${section} records and workflows.`}
+            </p>
+            {creatable && (
+              <button
+                onClick={() => {
+                  setForm(
+                    section === "staff"
+                      ? { password: crypto.randomUUID() + "!A" }
+                      : section === "profile"
+                        ? {
+                            billing_name: String(profile.billing_name ?? ""),
+                            email: String(profile.email ?? ""),
+                            company_name: String(profile.company_name ?? ""),
+                            phone: String(profile.phone ?? ""),
+                            billing_address: String(
+                              profile.billing_address ?? "",
+                            ),
+                            tax_id: String(profile.tax_id ?? ""),
+                          }
+                        : {},
+                  );
+                  setLineItems([
+                    {
+                      product_id: "",
+                      variant_id: "",
+                      quantity: "1",
+                      unit_price: "",
+                      base_price: "",
+                      tax_rate: "0",
+                    },
+                  ]);
+                  setDiscountProductIds([]);
+                  setModal(true);
+                }}
+                className="inline-flex items-center gap-2 rounded-lg bg-[#17212b] px-4 py-2.5 text-xs font-semibold text-white"
+              >
+                <Plus size={15} />{" "}
+                {canEditProfile
+                  ? "Edit profile"
+                  : `Create ${section === "staff" ? "staff" : section.slice(0, -1)}`}
+              </button>
+            )}
+          </div>
+          {section === "overview" && (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-4">
+                {metrics.map(([label, value, Icon]) => (
+                  <article
+                    key={label}
+                    className="rounded-xl border border-slate-200 bg-white p-5"
+                  >
+                    <div className="flex justify-between text-xs text-slate-500">
+                      <span>{label}</span>
+                      <Icon size={17} className="text-indigo-600" />
+                    </div>
+                    <p className="mt-5 text-2xl font-bold">
+                    {String(value ?? "—")}
+                    </p>
+                  </article>
+                ))}
+              </div>
+              <div className="mt-5 grid gap-5 xl:grid-cols-2">
+                <article className="rounded-xl border border-slate-200 bg-white p-6">
+                  <h2 className="font-bold">Financial position</h2>
+                  <div className="mt-6 grid grid-cols-2 gap-6">
+                    {[
+                      ["Annual recurring revenue", inr(summary.arr)],
+                      ["Outstanding balance", inr(summary.outstanding)],
+                      [
+                        "New subscriptions",
+                        String(summary.new_subscriptions ?? 0),
+                      ],
+                      [
+                        "Overdue invoices",
+                        String(summary.overdue_invoices ?? 0),
+                      ],
+                    ].map(([l, v]) => (
+                        <div key={String(l)}>
+                            <p className="text-xs text-slate-500">{String(l)}</p>
+                            <b className="mt-2 block text-xl">{String(v)}</b>
+                        </div>
+                        ))}
+                  </div>
+                </article>
+                <article className="rounded-xl border border-slate-200 bg-white p-6">
+                  <h2 className="font-bold">Quick actions</h2>
+                  <div className="mt-4 space-y-2">
+                    {[
+                      ["New customer", "customers"],
+                      ["New product", "products"],
+                      ["New subscription", "subscriptions"],
+                    ].map(([l, s]) => (
+                      <button
+                        key={s}
+                        onClick={() => setSection(s as Section)}
+                        className="flex w-full justify-between rounded-lg border border-slate-100 px-3 py-3 text-left text-sm hover:bg-slate-50"
+                      >
+                        {l}
+                        <span>↗</span>
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => action("/billing/run")}
+                      className="w-full rounded-lg bg-indigo-50 px-3 py-3 text-left text-sm font-semibold text-indigo-700"
+                    >
+                      Run due billing now →
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </>
+          )}
+          {section === "profile" && (
+            <div className="max-w-2xl rounded-xl border border-slate-200 bg-white p-6">
+              <h2 className="font-bold">Customer profile</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                Your billing contact details.
+              </p>
+              <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                {[
+                  ["Billing name", profile.billing_name],
+                  ["Email", profile.email],
+                  ["Company", profile.company_name],
+                  ["Phone", profile.phone],
+                  ["Billing address", profile.billing_address],
+                  ["Tax ID", profile.tax_id],
+                ].map(([k, v]) => (
+                <div key={String(k)}>
+                    <p className="text-xs text-slate-400">{String(k)}</p>
+                    <p className="mt-1 break-words text-sm font-medium">
+                    {String(v ?? "—")}
+                    </p>
+                </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {section === "reports" && (
+            <div className="rounded-xl border border-slate-200 bg-white p-6">
+              <h2 className="font-bold">Monthly verified collections</h2>
+              <div className="mt-6 space-y-4">
+                {rows.map((r, i) => (
+                  <div key={i} className="flex items-center gap-4 text-xs">
+                    <span className="w-20 text-slate-500">
+                      {String(r.month)}
+                    </span>
+                    <div className="h-2 flex-1 rounded-full bg-slate-100">
+                      <div
+                        className="h-full rounded-full bg-indigo-600"
+                        style={{
+                          width: `${Math.min(100, (Number(r.collected ?? 0) / Math.max(1, ...rows.map((x) => Number(x.collected ?? 0)))) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                    <b className="w-28 text-right">{inr(r.collected)}</b>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {section !== "overview" &&
+            section !== "reports" &&
+            section !== "profile" && (
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
+                  <div className="relative max-w-sm flex-1">
+                    <Search
+                      size={15}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={`Search ${section}…`}
+                      className="w-full rounded-lg border border-slate-200 py-2 pl-9 pr-3 text-xs outline-none focus:border-indigo-300"
+                    />
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    {filtered.length} records
+                  </span>
+                </div>
+                {busy ? (
+                  <p className="p-12 text-center text-sm text-slate-400">
+                    Loading…
+                  </p>
+                ) : !filtered.length ? (
+                  <div className="p-14 text-center">
+                    <FileText className="mx-auto text-slate-300" />
+                    <p className="mt-3 text-sm font-semibold">
+                      No records found
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Create a record or adjust your search.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[700px] text-left text-xs">
+                      <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-400">
+                        <tr>
+                          {Object.keys(filtered[0])
+                            .filter(
+                              (k) =>
+                                ![
+                                  "id",
+                                  "user_id",
+                                  "customer_id",
+                                  "plan_id",
+                                  "subscription_id",
+                                  "product_id",
+                                  "variant_id",
+                                  "invoice_id",
+                                  "password_hash",
+                                  "items",
+                                ].includes(k),
+                            )
+                            .slice(0, 7)
+                            .map((k) => (
+                              <th key={k} className="px-5 py-3">
+                                {pretty(k)}
+                              </th>
+                            ))}
+                          <th className="px-5 py-3 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filtered.map((r, i) => (
+                          <tr
+                            key={String(r.id ?? r.number ?? i)}
+                            className="hover:bg-slate-50/60"
+                          >
+                            {Object.entries(r)
+                              .filter(
+                                ([k]) =>
+                                  ![
+                                    "id",
+                                    "user_id",
+                                    "customer_id",
+                                    "plan_id",
+                                    "subscription_id",
+                                    "product_id",
+                                    "variant_id",
+                                    "invoice_id",
+                                    "password_hash",
+                                    "items",
+                                  ].includes(k),
+                              )
+                              .slice(0, 7)
+                              .map(([k, v]) => (
+                                <td
+                                  key={k}
+                                  className="max-w-[230px] truncate px-5 py-3.5 text-slate-600"
+                                >
+                                  {k === "status" ? (
+                                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px]">
+                                      {String(v)}
+                                    </span>
+                                  ) : typeof v === "number" &&
+                                    /(price|total|amount|paid)/i.test(k) ? (
+                                    inr(v)
+                                  ) : (
+                                    String(v ?? "—")
+                                  )}
+                                </td>
+                              ))}
+                            <td className="px-5 py-3 text-right">
+                              <div className="inline-flex gap-2">
+                                {section === "products" &&
+                                  r.id &&
+                                  user.role === "admin" && (
+                                    <button
+                                      onClick={() => {
+                                        const name = prompt("Variant name");
+                                        const price = prompt(
+                                          "Additional price (INR)",
+                                        );
+                                        if (name && price)
+                                          action(`/products/${r.id}/variants`, {
+                                            name,
+                                            additional_price: Number(price),
+                                          });
+                                      }}
+                                      className="rounded bg-indigo-50 px-2 py-1 text-indigo-700"
+                                    >
+                                      Add variant
+                                    </button>
+                                  )}
+                                {section === "staff" && r.id && (
+                                  <button
+                                    onClick={() =>
+                                      action(`/staff/${r.id}/deactivate`)
+                                    }
+                                    className="rounded bg-rose-50 px-2 py-1 text-rose-700"
+                                  >
+                                    Disable
+                                  </button>
+                                )}
+                                {section === "plans" &&
+                                  r.id &&
+                                  user.role === "admin" && (
+                                    <button
+                                      onClick={() =>
+                                        deactivate(`/plans/${r.id}`)
+                                      }
+                                      className="rounded bg-rose-50 px-2 py-1 text-rose-700"
+                                    >
+                                      Disable
+                                    </button>
+                                  )}
+                                {section === "plans" &&
+                                  r.id &&
+                                  user.role === "customer" && (
+                                    <button
+                                      onClick={() =>
+                                        action("/subscriptions/request", {
+                                          plan_id: Number(r.id),
+                                          quantity: Number(
+                                            r.minimum_quantity ?? 1,
+                                          ),
+                                          start_date: new Date()
+                                            .toISOString()
+                                            .slice(0, 10),
+                                        })
+                                      }
+                                      className="rounded bg-indigo-50 px-2 py-1 text-indigo-700"
+                                    >
+                                      Request plan
+                                    </button>
+                                  )}
+                                {section === "discounts" &&
+                                  r.id &&
+                                  user.role === "admin" && (
+                                    <button
+                                      onClick={() =>
+                                        deactivate(`/discounts/${r.id}`)
+                                      }
+                                      className="rounded bg-rose-50 px-2 py-1 text-rose-700"
+                                    >
+                                      Disable
+                                    </button>
+                                  )}
+                                {section === "taxes" &&
+                                  r.id &&
+                                  user.role === "admin" && (
+                                    <button
+                                      onClick={() =>
+                                        deactivate(`/taxes/${r.id}`)
+                                      }
+                                      className="rounded bg-rose-50 px-2 py-1 text-rose-700"
+                                    >
+                                      Disable
+                                    </button>
+                                  )}
+                                {section === "quotations" &&
+                                  r.id &&
+                                  user.role !== "customer" &&
+                                  r.status !== "confirmed" && (
+                                    <button
+                                      onClick={() =>
+                                        action(`/quotations/${r.id}/cancel`)
+                                      }
+                                      className="rounded bg-rose-50 px-2 py-1 text-rose-700"
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                {section === "invoices" &&
+                                  r.id &&
+                                  user.role !== "customer" &&
+                                  r.status === "draft" && (
+                                    <button
+                                      onClick={() =>
+                                        action(`/invoices/${r.id}/confirm`)
+                                      }
+                                      className="rounded bg-indigo-50 px-2 py-1 text-indigo-700"
+                                    >
+                                      Confirm
+                                    </button>
+                                  )}
+                                {section === "invoices" &&
+                                  r.id &&
+                                  user.role !== "customer" &&
+                                  r.status !== "paid" &&
+                                  r.status !== "cancelled" && (
+                                    <button
+                                      onClick={() =>
+                                        action(`/invoices/${r.id}/cancel`)
+                                      }
+                                      className="rounded bg-rose-50 px-2 py-1 text-rose-700"
+                                    >
+                                      Cancel
+                                    </button>
+                                  )}
+                                {section === "subscriptions" && r.id && (
+                                  <>
+                                    {r.status === "draft" &&
+                                      user.role !== "customer" && (
+                                        <button
+                                          title="Confirm"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/confirm`,
+                                            )
+                                          }
+                                          className="rounded bg-indigo-50 px-2 py-1 text-indigo-700"
+                                        >
+                                          Confirm
+                                        </button>
+                                      )}
+                                    {r.status === "confirmed" &&
+                                      user.role !== "customer" && (
+                                        <button
+                                          title="Activate"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/activate`,
+                                            )
+                                          }
+                                          className="rounded bg-emerald-50 px-2 py-1 text-emerald-700"
+                                        >
+                                          Activate
+                                        </button>
+                                      )}
+                                    {r.status === "active" &&
+                                      r.allow_pause !== false && (
+                                        <button
+                                          title="Pause"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/pause`,
+                                            )
+                                          }
+                                        >
+                                          <Pause size={14} />
+                                        </button>
+                                      )}
+                                    {r.status === "paused" &&
+                                      r.allow_pause !== false && (
+                                        <button
+                                          title="Resume"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/resume`,
+                                            )
+                                          }
+                                        >
+                                          <Play size={14} />
+                                        </button>
+                                      )}
+                                    {r.status === "active" &&
+                                      r.allow_renewal !== false && (
+                                        <button
+                                          title="Renew"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/renew`,
+                                            )
+                                          }
+                                        >
+                                          <RefreshCw size={14} />
+                                        </button>
+                                      )}
+                                    {r.status === "active" &&
+                                      r.expiry_date &&
+                                      String(r.expiry_date) <
+                                        new Date().toISOString().slice(0, 10) &&
+                                      user.role !== "customer" && (
+                                        <button
+                                          title="Expire"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/expire`,
+                                            )
+                                          }
+                                        >
+                                          <Ban size={14} />
+                                        </button>
+                                      )}
+                                    {["active", "paused", "confirmed"].includes(
+                                      String(r.status),
+                                    ) &&
+                                      r.allow_early_close !== false && (
+                                        <button
+                                          title="Close"
+                                          onClick={() =>
+                                            action(
+                                              `/subscriptions/${r.id}/action/close`,
+                                            )
+                                          }
+                                        >
+                                          <Ban size={14} />
+                                        </button>
+                                      )}
+                                  </>
+                                )}
+                                {section === "quotations" &&
+                                  r.id &&
+                                  user.role !== "customer" && (
+                                    <button
+                                      onClick={() =>
+                                        action(`/quotations/${r.id}/convert`)
+                                      }
+                                      className="rounded bg-indigo-50 px-2 py-1 text-indigo-700"
+                                    >
+                                      Convert
+                                    </button>
+                                  )}
+                                {section === "invoices" && r.id && (
+                                  <>
+                                    <button
+                                      title="Download PDF"
+                                      onClick={() =>
+                                        download(
+                                          Number(r.id),
+                                          String(r.number ?? "invoice"),
+                                        )
+                                      }
+                                    >
+                                      <ArrowDownToLine size={14} />
+                                    </button>
+                                    {r.status !== "paid" &&
+                                      r.status !== "cancelled" && (
+                                        <button
+                                          onClick={() =>
+                                            payOnline(Number(r.id))
+                                          }
+                                          className="rounded bg-indigo-50 px-2 py-1 text-indigo-700"
+                                        >
+                                          Pay online
+                                        </button>
+                                      )}
+                                    {user.role !== "customer" && (
+                                      <>
+                                        {r.status !== "paid" &&
+                                          r.status !== "cancelled" &&
+                                          r.status !== "draft" && (
+                                            <button
+                                              onClick={() => {
+                                                setPaymentInvoice(r);
+                                                setPaymentAmount(
+                                                  String(
+                                                    Math.max(
+                                                      0,
+                                                      Number(r.total ?? 0) -
+                                                        Number(
+                                                          r.amount_paid ?? 0,
+                                                        ),
+                                                    ),
+                                                  ),
+                                                );
+                                                setPaymentMethod("upi");
+                                                setPaymentReference("");
+                                              }}
+                                              className="rounded bg-slate-100 px-2 py-1 text-slate-700"
+                                            >
+                                              Record payment
+                                            </button>
+                                          )}
+                                        <button
+                                          onClick={() =>
+                                            action(`/invoices/${r.id}/send`)
+                                          }
+                                          className="rounded bg-slate-100 px-2 py-1 text-slate-700"
+                                        >
+                                          Email
+                                        </button>
+                                      </>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+        </div>
+      </main>
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-2xl bg-white p-6">
+            <div className="mb-5 flex justify-between">
+              <h2 className="font-bold">
+                {canEditProfile
+                  ? "Edit profile"
+                  : `Create ${section === "staff" ? "staff member" : section.slice(0, -1)}`}
+              </h2>
+              <button onClick={() => setModal(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={create} className="grid gap-4 sm:grid-cols-2">
+              {(section === "customers" || section === "profile") && (
+                <>
+                  {field("Billing name", "billing_name", "text", true)}
+                  {field("Email", "email", "email", true)}
+                  {field("Company", "company_name")}
+                  {field("Phone", "phone")}
+                  {field("Billing address", "billing_address")}
+                  {field("Tax ID", "tax_id")}
+                </>
+              )}
+              {section === "staff" && (
+                <>
+                  {field("Full name", "full_name", "text", true)}
+                  {field("Email", "email", "email", true)}
+                  {field("Temporary password", "password", "text", true)}
+                  <div className="col-span-full flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        change("password", crypto.randomUUID() + "!A")
+                      }
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+                    >
+                      Regenerate password
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(form.password ?? "");
+                        notify("Temporary password copied");
+                      }}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
+                    >
+                      Copy password
+                    </button>
+                  </div>
+                </>
+              )}
+              {section === "products" && (
+                <>
+                  {field("Product name", "name", "text", true)}
+                  {select("Product type", "product_type", [
+                    "software",
+                    "service",
+                    "goods",
+                  ])}
+                  {field("Sales price (₹)", "sales_price", "number", true)}
+                  {field("Cost price (₹)", "cost_price", "number")}
+                  {field("Notes", "notes")}
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.is_active !== "false"}
+                      onChange={(e) =>
+                        change("is_active", String(e.target.checked))
+                      }
+                    />{" "}
+                    Active product
+                  </label>
+                </>
+              )}
+              {section === "templates" && (
+                <>
+                  {field("Template name", "name", "text", true)}
+                  {field("Validity days", "validity_days", "number")}
+                  {lineItems.map((_, i) => lineEditor(i))}
+                  <div className="col-span-full">
+                    <button
+                      type="button"
+                      onClick={addLine}
+                      className="text-xs font-semibold text-indigo-700"
+                    >
+                      + Add product line
+                    </button>
+                  </div>
+                  {lineSummary}
+                </>
+              )}
+              {section === "plans" && (
+                <>
+                  {field("Plan name", "name", "text", true)}
+                  {select("Billing interval", "billing_interval", [
+                    "daily",
+                    "weekly",
+                    "monthly",
+                    "yearly",
+                  ])}
+                  {field("Price (₹)", "price", "number", true)}
+                  {field("Minimum quantity", "minimum_quantity", "number")}
+                  {field("Available from", "available_from", "date")}
+                  {field("Available until", "available_until", "date")}
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.auto_close === "true"}
+                      onChange={(e) =>
+                        change("auto_close", String(e.target.checked))
+                      }
+                    />{" "}
+                    Automatically close at expiry
+                  </label>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.allow_early_close !== "false"}
+                      onChange={(e) =>
+                        change("allow_early_close", String(e.target.checked))
+                      }
+                    />{" "}
+                    Allow early closure
+                  </label>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.allow_pause !== "false"}
+                      onChange={(e) =>
+                        change("allow_pause", String(e.target.checked))
+                      }
+                    />{" "}
+                    Allow pause
+                  </label>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.allow_renewal !== "false"}
+                      onChange={(e) =>
+                        change("allow_renewal", String(e.target.checked))
+                      }
+                    />{" "}
+                    Allow renewal
+                  </label>
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.is_active !== "false"}
+                      onChange={(e) =>
+                        change("is_active", String(e.target.checked))
+                      }
+                    />{" "}
+                    Active plan
+                  </label>
+                </>
+              )}
+              {section === "taxes" && (
+                <>
+                  {field("Tax name", "name", "text", true)}
+                  <label className="block text-xs font-semibold text-slate-600">
+                    Common rate preset
+                    <select
+                      value={form.rate_preset ?? "18"}
+                      onChange={(e) => {
+                        change("rate_preset", e.target.value);
+                        if (e.target.value !== "custom")
+                          change("rate", e.target.value);
+                      }}
+                      className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                    >
+                      <option value="0">0%</option>
+                      <option value="5">5%</option>
+                      <option value="12">12%</option>
+                      <option value="18">18%</option>
+                      <option value="28">28%</option>
+                      <option value="custom">Custom rate</option>
+                    </select>
+                  </label>
+                  {field("Rate %", "rate", "number", true)}
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.is_active !== "false"}
+                      onChange={(e) =>
+                        change("is_active", String(e.target.checked))
+                      }
+                    />{" "}
+                    Active tax
+                  </label>
+                </>
+              )}
+              {section === "discounts" && (
+                <>
+                  {field("Name", "name", "text", true)}
+                  {select("Type", "kind", ["percentage", "fixed"])}
+                  {field(
+                    form.kind === "fixed" ? "Value (₹)" : "Value (%)",
+                    "value",
+                    "number",
+                    true,
+                  )}
+                  {field("Minimum purchase (₹)", "min_purchase", "number")}
+                  {field("Minimum quantity", "min_quantity", "number")}
+                  {field("Maximum uses", "max_uses", "number")}
+                  {field("Starts on", "starts_at", "date")}
+                  {field("Ends on", "ends_at", "date")}
+                  <AsyncMultiSelect
+                    label="Applicable products (optional)"
+                    endpoint="/products"
+                    value={discountProductIds}
+                    onChange={setDiscountProductIds}
+                  />
+                  <label className="flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={form.is_active !== "false"}
+                      onChange={(e) =>
+                        change("is_active", String(e.target.checked))
+                      }
+                    />{" "}
+                    Active discount
+                  </label>
+                </>
+              )}
+              {(section === "quotations" || section === "subscriptions") && (
+                <>
+                  {searchable("Customer", "/customers", "customer_id", true)}
+                  {searchable("Plan", "/plans", "plan_id", true, (o) => {
+                    if (o?.raw?.minimum_quantity)
+                      change("quantity", String(o.raw.minimum_quantity));
+                  })}
+                  {section === "quotations" ? (
+                    <>
+                      {lineItems.map((_, i) => lineEditor(i))}
+                      <div className="col-span-full">
+                        <button
+                          type="button"
+                          onClick={addLine}
+                          className="text-xs font-semibold text-indigo-700"
+                        >
+                          + Add product line
+                        </button>
+                      </div>
+                      {lineSummary}
+                      {field("Validity days", "validity_days", "number")}
+                    </>
+                  ) : (
+                    <>
+                      {field("Start date", "start_date", "date")}
+                      {field("Quantity", "quantity", "number")}
+                    </>
+                  )}
+                </>
+              )}
+              <div className="col-span-full flex justify-end gap-2 border-t border-slate-100 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setModal(false)}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold"
+                >
+                  Cancel
+                </button>
+                <button className="rounded-lg bg-[#17212b] px-4 py-2 text-xs font-semibold text-white">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {paymentInvoice && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-slate-900/40 p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <h2 className="font-bold">Record payment</h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Invoice{" "}
+                  {String(paymentInvoice.number ?? `#${paymentInvoice.id}`)}
+                </p>
+              </div>
+              <button type="button" onClick={() => setPaymentInvoice(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="mb-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3">
+              <div>
+                <p className="text-[11px] text-slate-500">Invoice total</p>
+                <b>{inr(paymentInvoice.total)}</b>
+              </div>
+              <div>
+                <p className="text-[11px] text-slate-500">Already paid</p>
+                <b>{inr(paymentInvoice.amount_paid)}</b>
+              </div>
+              <div className="col-span-2">
+                <p className="text-[11px] text-slate-500">
+                  Outstanding balance
+                </p>
+                <b className="text-lg">
+                  {inr(
+                    Number(paymentInvoice.total ?? 0) -
+                      Number(paymentInvoice.amount_paid ?? 0),
+                  )}
+                </b>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <label className="block text-xs font-semibold text-slate-600">
+                Payment amount (₹)
+                <input
+                  type="number"
+                  min="0.01"
+                  max={Math.max(
+                    0,
+                    Number(paymentInvoice.total ?? 0) -
+                      Number(paymentInvoice.amount_paid ?? 0),
+                  )}
+                  step="0.01"
+                  required
+                  value={paymentAmount}
+                  onChange={(e) => setPaymentAmount(e.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm"
+                />
+              </label>
+              <label className="block text-xs font-semibold text-slate-600">
+                Payment method
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm"
+                >
+                  <option value="upi">UPI</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="cash">Cash</option>
+                  <option value="card">Card</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <label className="block text-xs font-semibold text-slate-600">
+                Reference (optional)
+                <input
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm"
+                  placeholder="Transaction reference"
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPaymentInvoice(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={recordPayment}
+                className="rounded-lg bg-[#17212b] px-4 py-2 text-xs font-semibold text-white"
+              >
+                Record payment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {notice && (
+        <div
+          role="status"
+          className={`fixed bottom-5 right-5 z-[60] rounded-xl px-4 py-3 text-sm text-white shadow-xl ${bad ? "bg-rose-600" : "bg-emerald-700"}`}
+        >
+          {notice}
+        </div>
+      )}
+    </div>
+  );
 }
 
-function Toast({text,bad}:{text:string;bad:boolean}) {
- return <div role="status" className={`fixed bottom-5 right-5 z-[60] rounded-xl px-4 py-3 text-sm text-white shadow-xl ${bad?"bg-rose-600":"bg-emerald-700"}`}>{text}</div>;
+function Toast({ text, bad }: { text: string; bad: boolean }) {
+  return (
+    <div
+      role="status"
+      className={`fixed bottom-5 right-5 z-[60] rounded-xl px-4 py-3 text-sm text-white shadow-xl ${bad ? "bg-rose-600" : "bg-emerald-700"}`}
+    >
+      {text}
+    </div>
+  );
 }
