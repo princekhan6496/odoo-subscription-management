@@ -1,0 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+@tailwind base;@tailwind components;@tailwind utilities;
+:root{color-scheme:light;--ink:#17212b;--muted:#6c7885;--line:#e6eaee;--canvas:#f6f8fa;--accent:#3659d9}
+*{box-sizing:border-box}html,body{min-height:100%}body{margin:0;background:var(--canvas);color:var(--ink);font-family:'DM Sans',Arial,sans-serif}h1,h2,h3,.brand{font-family:Manrope,'DM Sans',sans-serif}button,input,select{font:inherit}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #a8b8ff;outline-offset:2px}::selection{background:#dce4ff}
+
+:root{--ease-out:cubic-bezier(.23,1,.32,1)}
+button{transition:transform 100ms var(--ease-out),background-color 140ms ease-out,color 140ms ease-out,border-color 140ms ease-out}
+button:active{transform:scale(.98);transition-duration:160ms}
+@media (hover:hover) and (pointer:fine){button:hover{transition-duration:120ms}}
+@media (hover:none) and (pointer:coarse){input,select,textarea{font-size:16px}button{-webkit-tap-highlight-color:transparent}}
+@supports (padding:max(0px)){body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto!important}button:active{transform:none}}
