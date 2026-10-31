@@ -9,7 +9,7 @@ payments, discounts, and business operations from one workspace.
 **Frontend:** <https://odoosubsciptionmanagement.vercel.app/>
 
 **Test User:** <admin@brightlight.demo>
-**Password:** <Admin@Brightlight2026!>
+**Password:** **Admin@Brightlight2026!**
 
 ## Overview
 
