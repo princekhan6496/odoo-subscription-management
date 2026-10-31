@@ -8,14 +8,8 @@ payments, discounts, and business operations from one workspace.
 
 **Frontend:** <https://odoosubsciptionmanagement.vercel.app/>
 
-**Backend API:** <https://odoo-subscription-management.onrender.com>
-
-**API Documentation:**
-<https://odoo-subscription-management.onrender.com/docs>
-
-> The frontend and backend are deployed separately. The live application
-> depends on the backend service being available. On free hosting plans,
-> the backend may take a little time to wake up after inactivity.
+**Test User:**admin@brightlight.demo
+**Password:**Admin@Brightlight2026!
 
 ## Overview
 
